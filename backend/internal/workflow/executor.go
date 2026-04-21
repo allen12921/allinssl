@@ -131,8 +131,10 @@ func deploy(params map[string]any) (any, error) {
 					logger.Info("=============部署失败=============")
 					return nil, errors.New("证书hash格式错误")
 				}
-				if beSha256 == nowSha256 && deployData[0]["status"].(string) == "success" {
-					logger.Info("与上次部署的证书sha256相同且上次部署成功，跳过重复部署")
+				beDomain, _ := deployData[0]["domain"].(string)
+				nowDomain, _ := params["domain"].(string)
+				if beSha256 == nowSha256 && deployData[0]["status"].(string) == "success" && beDomain == nowDomain {
+					logger.Info("与上次部署的证书sha256相同且域名未变更且上次部署成功，跳过重复部署")
 					logger.Info("=============部署成功=============")
 					return map[string]any{
 						"skip": true,
@@ -152,10 +154,11 @@ func deploy(params map[string]any) (any, error) {
 		status = "success"
 		logger.Info("=============部署成功=============")
 	}
+	domain, _ := params["domain"].(string)
 	if len(deployData) > 0 {
-		s.Where("workflow_id=? and id=?", []any{workflowId, params["NodeId"]}).Update(map[string]interface{}{"cert_hash": nowSha256, "status": status})
+		s.Where("workflow_id=? and id=?", []any{workflowId, params["NodeId"]}).Update(map[string]interface{}{"cert_hash": nowSha256, "status": status, "domain": domain})
 	} else {
-		s.Insert(map[string]interface{}{"cert_hash": nowSha256, "workflow_id": workflowId, "id": params["NodeId"], "status": status})
+		s.Insert(map[string]interface{}{"cert_hash": nowSha256, "workflow_id": workflowId, "id": params["NodeId"], "status": status, "domain": domain})
 	}
 	return nil, err
 }

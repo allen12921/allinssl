@@ -140,11 +140,15 @@ func init() {
 		workflow_id TEXT,
 		cert_hash   TEXT,
 		status      TEXT,
+		domain      TEXT DEFAULT '',
 		constraint workflow_deploy_pk
 			primary key (id, workflow_id)
 	);
 
 	`)
+	// Migrate existing databases that predate the domain column.
+	_, _ = db.Exec(`ALTER TABLE workflow_deploy ADD COLUMN domain TEXT DEFAULT ''`)
+
 	insertDefaultData(db, "access_type", `
 	INSERT INTO access_type (name, type) VALUES ('aliyun', 'dns');
 	INSERT INTO access_type (name, type) VALUES ('tencentcloud', 'dns');
