@@ -22,14 +22,22 @@ func CreateClient(accessKey, accessSecret, endpoint string) (*cas.Client, error)
 }
 
 func Upload(client *cas.Client, cert, key, name string) error {
+	_, err := UploadAndGetId(client, cert, key, name)
+	return err
+}
+
+func UploadAndGetId(client *cas.Client, cert, key, name string) (*int64, error) {
 	req := &cas.UploadUserCertificateRequest{
 		Name: tea.String(name),
 		Cert: tea.String(cert),
 		Key:  tea.String(key),
 	}
 	runtime := &util.RuntimeOptions{}
-	_, err := client.UploadUserCertificateWithOptions(req, runtime)
-	return err
+	resp, err := client.UploadUserCertificateWithOptions(req, runtime)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body.CertId, nil
 }
 
 func Deploy(cfg map[string]any) error {

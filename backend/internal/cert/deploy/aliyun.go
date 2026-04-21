@@ -77,6 +77,15 @@ func DeployAliCdn(cfg map[string]any) error {
 		return fmt.Errorf("证书错误：cert")
 	}
 
+	casClient, err := aliyun.ClientAliCas(providerConfig["access_key_id"], providerConfig["access_key_secret"])
+	if err != nil {
+		return err
+	}
+	certId, err := casClient.UploadCert(fmt.Sprintf("allinssl_%d", time.Now().UnixMilli()), strings.TrimSpace(certPem), strings.TrimSpace(keyPem))
+	if err != nil {
+		return err
+	}
+
 	deployed := 0
 	for _, d := range strings.Split(domain, ",") {
 		d = strings.TrimSpace(d)
@@ -86,8 +95,8 @@ func DeployAliCdn(cfg map[string]any) error {
 		setCdnDomainSSLCertificateRequest := &aliyuncdn.SetCdnDomainSSLCertificateRequest{
 			DomainName:  tea.String(d),
 			SSLProtocol: tea.String("on"),
-			SSLPub:      tea.String(strings.TrimSpace(certPem)),
-			SSLPri:      tea.String(strings.TrimSpace(keyPem)),
+			CertType:    tea.String("cas"),
+			CertId:      certId,
 		}
 		if _, err = client.SetCdnDomainSSLCertificate(setCdnDomainSSLCertificateRequest); err != nil {
 			return err

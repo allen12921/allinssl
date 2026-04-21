@@ -3,7 +3,9 @@ package dcdn
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"ALLinSSL/plugins/alicloud/cas"
 	aliyunopenapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	dcdn "github.com/alibabacloud-go/dcdn-20180115/v3/client"
 	util "github.com/alibabacloud-go/tea-utils/v2/service"
@@ -44,6 +46,14 @@ func Deploy(cfg map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("创建 DCDN 客户端失败: %w", err)
 	}
+	casClient, err := cas.CreateClient(accessKey, accessSecret, "cas.aliyuncs.com")
+	if err != nil {
+		return err
+	}
+	certId, err := cas.UploadAndGetId(casClient, strings.TrimSpace(certPEM), strings.TrimSpace(keyPEM), fmt.Sprintf("allinssl_%d", time.Now().UnixMilli()))
+	if err != nil {
+		return err
+	}
 	runtime := &util.RuntimeOptions{}
 	deployed := 0
 	for _, d := range strings.Split(domain, ",") {
@@ -53,10 +63,9 @@ func Deploy(cfg map[string]any) error {
 		}
 		req := &dcdn.SetDcdnDomainSSLCertificateRequest{
 			DomainName:  tea.String(d),
-			SSLPri:      tea.String(keyPEM),
-			SSLPub:      tea.String(certPEM),
 			SSLProtocol: tea.String("on"),
-			CertType:    tea.String("upload"),
+			CertType:    tea.String("cas"),
+			CertId:      certId,
 		}
 		if _, err = client.SetDcdnDomainSSLCertificateWithOptions(req, runtime); err != nil {
 			return err

@@ -3,7 +3,9 @@ package cdn
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"ALLinSSL/plugins/alicloud/cas"
 	aliyuncdn "github.com/alibabacloud-go/cdn-20180510/v6/client"
 	aliyunopenapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	"github.com/alibabacloud-go/tea/tea"
@@ -47,6 +49,14 @@ func Deploy(cfg map[string]any) error {
 	if err != nil {
 		return err
 	}
+	casClient, err := cas.CreateClient(accessKey, accessSecret, "cas.aliyuncs.com")
+	if err != nil {
+		return err
+	}
+	certId, err := cas.UploadAndGetId(casClient, strings.TrimSpace(certPEM), strings.TrimSpace(keyPEM), fmt.Sprintf("allinssl_%d", time.Now().UnixMilli()))
+	if err != nil {
+		return err
+	}
 	deployed := 0
 	for _, d := range strings.Split(domain, ",") {
 		d = strings.TrimSpace(d)
@@ -56,8 +66,8 @@ func Deploy(cfg map[string]any) error {
 		req := &aliyuncdn.SetCdnDomainSSLCertificateRequest{
 			DomainName:  tea.String(d),
 			SSLProtocol: tea.String("on"),
-			SSLPub:      tea.String(strings.TrimSpace(certPEM)),
-			SSLPri:      tea.String(strings.TrimSpace(keyPEM)),
+			CertType:    tea.String("cas"),
+			CertId:      certId,
 		}
 		if _, err = client.SetCdnDomainSSLCertificate(req); err != nil {
 			return err

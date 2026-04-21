@@ -2,9 +2,12 @@ package aliyun
 
 import (
 	"ALLinSSL/backend/internal/access"
+	aliCas "ALLinSSL/backend/internal/cert/deploy/client/aliyun"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	dcdn "github.com/alibabacloud-go/dcdn-20180115/v3/client"
 	util "github.com/alibabacloud-go/tea-utils/v2/service"
@@ -21,23 +24,18 @@ func CreateDcdnClient(accessKey, accessSecret string) (*dcdn.Client, error) {
 	return dcdn.NewClient(config)
 }
 
-func DeployCertToDcdn(client *dcdn.Client, domain, certPEM, privkeyPEM string) error {
+func DeployCertToDcdn(client *dcdn.Client, domain string, certId *int64) error {
 	request := &dcdn.SetDcdnDomainSSLCertificateRequest{
 		DomainName:  tea.String(domain),
-		SSLPri:      tea.String(privkeyPEM),
-		SSLPub:      tea.String(certPEM),
 		SSLProtocol: tea.String("on"),
-		CertType:    tea.String("upload"),
+		CertType:    tea.String("cas"),
+		CertId:      certId,
 	}
 
 	runtime := &util.RuntimeOptions{}
 
 	_, err := client.SetDcdnDomainSSLCertificateWithOptions(request, runtime)
-	if err != nil {
-		return err
-	}
-	return nil
-
+	return err
 }
 
 func DeployAliyunDcdn(cfg map[string]any) error {
@@ -85,13 +83,22 @@ func DeployAliyunDcdn(cfg map[string]any) error {
 	if !ok {
 		return fmt.Errorf("域名不存在或格式错误")
 	}
+	casClient, err := aliCas.ClientAliCas(providerConfig["access_key_id"], providerConfig["access_key_secret"])
+	if err != nil {
+		return fmt.Errorf("创建 CAS 客户端失败: %w", err)
+	}
+	certId, err := casClient.UploadCert(fmt.Sprintf("allinssl_%d", time.Now().UnixMilli()), certPEM, privkeyPEM)
+	if err != nil {
+		return fmt.Errorf("上传证书到 CAS 失败: %w", err)
+	}
+
 	deployed := 0
 	for _, d := range strings.Split(domain, ",") {
 		d = strings.TrimSpace(d)
 		if d == "" {
 			continue
 		}
-		if err = DeployCertToDcdn(client, d, certPEM, privkeyPEM); err != nil {
+		if err = DeployCertToDcdn(client, d, certId); err != nil {
 			return fmt.Errorf("部署证书到 DCDN 失败: %w", err)
 		}
 		deployed++

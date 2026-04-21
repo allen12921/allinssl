@@ -61,8 +61,8 @@ func DeployAWSCloudFront(cfg map[string]any) error {
 		region = "us-east-1"
 	}
 
-	distributionID, ok := cfg["domain"].(string)
-	if !ok || distributionID == "" {
+	domainRaw, ok := cfg["domain"].(string)
+	if !ok || domainRaw == "" {
 		return fmt.Errorf("参数错误：domain（请填写 CloudFront Distribution ID）")
 	}
 
@@ -99,9 +99,8 @@ func DeployAWSCloudFront(cfg map[string]any) error {
 
 	iamClient := iam.NewFromConfig(iamCfg)
 
-	// Generate a unique name for the IAM server certificate.
-	certName := fmt.Sprintf("allinssl-%s-%d", strings.ReplaceAll(distributionID, ".", "-"), time.Now().Unix())
-
+	// Upload the certificate once; reuse the same IAM cert ID for all distributions.
+	certName := fmt.Sprintf("allinssl-%d", time.Now().UnixNano())
 	uploadInput := &iam.UploadServerCertificateInput{
 		ServerCertificateName: aws.String(certName),
 		CertificateBody:       aws.String(strings.TrimSpace(leafCert)),
@@ -129,28 +128,40 @@ func DeployAWSCloudFront(cfg map[string]any) error {
 
 	cfClient := cloudfront.NewFromConfig(cfCfg)
 
-	// Fetch current distribution config and ETag (required for update).
-	getResp, err := cfClient.GetDistribution(ctx, &cloudfront.GetDistributionInput{
-		Id: aws.String(distributionID),
-	})
-	if err != nil {
-		return fmt.Errorf("获取 CloudFront 分配配置失败: %v", err)
-	}
+	deployed := 0
+	for _, distributionID := range strings.Split(domainRaw, ",") {
+		distributionID = strings.TrimSpace(distributionID)
+		if distributionID == "" {
+			continue
+		}
 
-	distConfig := getResp.Distribution.DistributionConfig
-	distConfig.ViewerCertificate = &cftypes.ViewerCertificate{
-		IAMCertificateId:       aws.String(iamCertID),
-		SSLSupportMethod:       cftypes.SSLSupportMethodSniOnly,
-		MinimumProtocolVersion: cftypes.MinimumProtocolVersionTLSv122021,
-	}
+		// Fetch current distribution config and ETag (required for update).
+		getResp, err := cfClient.GetDistribution(ctx, &cloudfront.GetDistributionInput{
+			Id: aws.String(distributionID),
+		})
+		if err != nil {
+			return fmt.Errorf("获取 CloudFront 分配配置失败 (%s): %v", distributionID, err)
+		}
 
-	_, err = cfClient.UpdateDistribution(ctx, &cloudfront.UpdateDistributionInput{
-		Id:                 aws.String(distributionID),
-		IfMatch:            getResp.ETag,
-		DistributionConfig: distConfig,
-	})
-	if err != nil {
-		return fmt.Errorf("更新 CloudFront 分配失败: %v", err)
+		distConfig := getResp.Distribution.DistributionConfig
+		distConfig.ViewerCertificate = &cftypes.ViewerCertificate{
+			IAMCertificateId:       aws.String(iamCertID),
+			SSLSupportMethod:       cftypes.SSLSupportMethodSniOnly,
+			MinimumProtocolVersion: cftypes.MinimumProtocolVersionTLSv122021,
+		}
+
+		_, err = cfClient.UpdateDistribution(ctx, &cloudfront.UpdateDistributionInput{
+			Id:                 aws.String(distributionID),
+			IfMatch:            getResp.ETag,
+			DistributionConfig: distConfig,
+		})
+		if err != nil {
+			return fmt.Errorf("更新 CloudFront 分配失败 (%s): %v", distributionID, err)
+		}
+		deployed++
+	}
+	if deployed == 0 {
+		return fmt.Errorf("参数错误：domain")
 	}
 
 	return nil
