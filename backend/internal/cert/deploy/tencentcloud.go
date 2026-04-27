@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"ALLinSSL/backend/internal/access"
+	"ALLinSSL/backend/public"
 	"encoding/json"
 	"fmt"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
@@ -41,7 +42,7 @@ func UploadToTX(client *ssl.Client, key, cert string) (string, error) {
 	return *response.Response.CertificateId, nil
 }
 
-func DeployToTX(cfg map[string]any) error {
+func DeployToTX(cfg map[string]any, logger *public.Logger) error {
 	cert, ok := cfg["certificate"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("证书不存在")
@@ -109,6 +110,7 @@ func DeployToTX(cfg map[string]any) error {
 		}
 		for i, d := range domainArray {
 			domainArray[i] = strings.TrimSpace(d)
+			logger.Info("正在部署域名: " + domainArray[i])
 		}
 		request.InstanceIdList = common.StringPtrs(domainArray)
 		request.ResourceType = common.StringPtr(resourceType)

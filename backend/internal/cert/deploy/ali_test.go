@@ -1,6 +1,19 @@
 package deploy
 
-import "testing"
+import (
+	"ALLinSSL/backend/public"
+	"testing"
+)
+
+func newTestLogger(t *testing.T) *public.Logger {
+	t.Helper()
+	logger, err := public.NewLogger(t.TempDir() + "/test.log")
+	if err != nil {
+		t.Fatalf("failed to create test logger: %v", err)
+	}
+	t.Cleanup(func() { logger.Close() })
+	return logger
+}
 
 func TestALiCdn(t *testing.T) {
 	cfg := map[string]any{
@@ -12,7 +25,7 @@ func TestALiCdn(t *testing.T) {
 			"issuer": "cert-issuer",
 		},
 	}
-	err := DeployAliCdn(cfg)
+	err := DeployAliCdn(cfg, newTestLogger(t))
 	if err != nil {
 		t.Errorf("DeployAliCdn failed: %v", err)
 	} else {

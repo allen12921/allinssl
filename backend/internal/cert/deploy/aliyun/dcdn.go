@@ -3,6 +3,7 @@ package aliyun
 import (
 	"ALLinSSL/backend/internal/access"
 	aliCas "ALLinSSL/backend/internal/cert/deploy/client/aliyun"
+	"ALLinSSL/backend/public"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -38,7 +39,7 @@ func DeployCertToDcdn(client *dcdn.Client, domain string, certId *int64) error {
 	return err
 }
 
-func DeployAliyunDcdn(cfg map[string]any) error {
+func DeployAliyunDcdn(cfg map[string]any, logger *public.Logger) error {
 	cert, ok := cfg["certificate"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("证书不存在")
@@ -98,6 +99,7 @@ func DeployAliyunDcdn(cfg map[string]any) error {
 		if d == "" {
 			continue
 		}
+		logger.Info("正在部署域名: " + d)
 		if err = DeployCertToDcdn(client, d, certId); err != nil {
 			return fmt.Errorf("部署证书到 DCDN 失败: %w", err)
 		}

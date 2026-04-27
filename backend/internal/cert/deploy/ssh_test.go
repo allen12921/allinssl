@@ -1,6 +1,19 @@
 package deploy
 
-import "testing"
+import (
+	"ALLinSSL/backend/public"
+	"testing"
+)
+
+func newSSHTestLogger(t *testing.T) *public.Logger {
+	t.Helper()
+	logger, err := public.NewLogger(t.TempDir() + "/test.log")
+	if err != nil {
+		t.Fatalf("failed to create test logger: %v", err)
+	}
+	t.Cleanup(func() { logger.Close() })
+	return logger
+}
 
 func TestSSH(t *testing.T) {
 	cfg := map[string]any{
@@ -14,7 +27,7 @@ func TestSSH(t *testing.T) {
 			"issuer": "cert-issuer",
 		},
 	}
-	err := DeploySSH(cfg)
+	err := DeploySSH(cfg, newSSHTestLogger(t))
 	if err != nil {
 		t.Fatalf("DeploySSH failed: %v", err)
 	}

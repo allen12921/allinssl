@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"ALLinSSL/backend/internal/access"
+	"ALLinSSL/backend/public"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -25,7 +26,7 @@ import (
 //   - certificate: map with "cert" (PEM) and "key" (PEM)
 //   - provider_id: ID referencing the AWS access config (access_key_id, secret_access_key, region)
 //   - domain: CloudFront Distribution ID (e.g. "E1234567890ABC")
-func DeployAWSCloudFront(cfg map[string]any) error {
+func DeployAWSCloudFront(cfg map[string]any, logger *public.Logger) error {
 	cert, ok := cfg["certificate"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("证书不存在")
@@ -134,6 +135,7 @@ func DeployAWSCloudFront(cfg map[string]any) error {
 		if distributionID == "" {
 			continue
 		}
+		logger.Info("正在部署 Distribution ID: " + distributionID)
 
 		// Fetch current distribution config and ETag (required for update).
 		getResp, err := cfClient.GetDistribution(ctx, &cloudfront.GetDistributionInput{

@@ -34,19 +34,19 @@ func Deploy(cfg map[string]any, logger *public.Logger) error {
 	case "tencentcloud-cdn":
 		cfg["resource_type"] = "cdn"
 		logger.Debug("部署到腾讯云CDN...")
-		return DeployToTX(cfg)
+		return DeployToTX(cfg, logger)
 	case "tencentcloud-cos":
 		cfg["resource_type"] = "cos"
 		logger.Debug("部署到腾讯云COS...")
-		return DeployToTX(cfg)
+		return DeployToTX(cfg, logger)
 	case "tencentcloud-waf":
 		cfg["resource_type"] = "waf"
 		logger.Debug("部署到腾讯云WAF...")
-		return DeployToTX(cfg)
+		return DeployToTX(cfg, logger)
 	case "tencentcloud-teo":
 		cfg["resource_type"] = "teo"
 		logger.Debug("部署到腾讯云EdgeOne...")
-		return DeployToTX(cfg)
+		return DeployToTX(cfg, logger)
 	case "1panel":
 		logger.Debug("部署到1Panel...")
 		return Deploy1panel(cfg)
@@ -58,7 +58,7 @@ func Deploy(cfg map[string]any, logger *public.Logger) error {
 		return DeploySSH(cfg, logger)
 	case "aliyun-cdn":
 		logger.Debug("部署到阿里云CDN...")
-		return DeployAliCdn(cfg)
+		return DeployAliCdn(cfg, logger)
 	case "aliyun-oss":
 		logger.Debug("部署到阿里云OSS...")
 		return DeployOss(cfg)
@@ -70,7 +70,7 @@ func Deploy(cfg map[string]any, logger *public.Logger) error {
 		return aliyun.DeployAliyunESA(cfg)
 	case "aliyun-dcdn":
 		logger.Debug("部署到阿里云DCDN...")
-		return aliyun.DeployAliyunDcdn(cfg)
+		return aliyun.DeployAliyunDcdn(cfg, logger)
 	case "safeline-site":
 		logger.Debug("部署雷池WAF网站...")
 		return DeploySafeLineWafSite(cfg, logger)
@@ -85,10 +85,10 @@ func Deploy(cfg map[string]any, logger *public.Logger) error {
 		return DeployLocalhost(cfg)
 	case "qiniu-cdn":
 		logger.Debug("部署到七牛云CDN...")
-		return DeployQiniuCdn(cfg)
+		return DeployQiniuCdn(cfg, logger)
 	case "qiniu-oss":
 		logger.Debug("部署到七牛云OSS...")
-		return DeployQiniuOss(cfg)
+		return DeployQiniuOss(cfg, logger)
 	case "baidu-cdn":
 		logger.Debug("部署到百度云CDN...")
 		return DeployBaiduCdn(cfg)
@@ -118,7 +118,7 @@ func Deploy(cfg map[string]any, logger *public.Logger) error {
 		return DeployRainyunSSLCenter(cfg)
 	case "aws-cloudfront":
 		logger.Debug("部署到 AWS CloudFront...")
-		return DeployAWSCloudFront(cfg)
+		return DeployAWSCloudFront(cfg, logger)
 	default:
 		return fmt.Errorf("不支持的部署: %s", providerName)
 	}

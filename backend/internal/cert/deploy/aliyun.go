@@ -3,6 +3,7 @@ package deploy
 import (
 	"ALLinSSL/backend/internal/access"
 	"ALLinSSL/backend/internal/cert/deploy/client/aliyun"
+	"ALLinSSL/backend/public"
 	"encoding/json"
 	"fmt"
 	aliyuncdn "github.com/alibabacloud-go/cdn-20180510/v6/client"
@@ -29,7 +30,7 @@ func ClientAliCdn(accessKey, accessSecret string) (_result *aliyuncdn.Client, er
 	return client, nil
 }
 
-func DeployAliCdn(cfg map[string]any) error {
+func DeployAliCdn(cfg map[string]any, logger *public.Logger) error {
 	cert, ok := cfg["certificate"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("证书不存在")
@@ -92,6 +93,7 @@ func DeployAliCdn(cfg map[string]any) error {
 		if d == "" {
 			continue
 		}
+		logger.Info("正在部署域名: " + d)
 		setCdnDomainSSLCertificateRequest := &aliyuncdn.SetCdnDomainSSLCertificateRequest{
 			DomainName:  tea.String(d),
 			SSLProtocol: tea.String("on"),

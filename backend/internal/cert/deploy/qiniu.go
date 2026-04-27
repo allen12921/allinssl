@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"ALLinSSL/backend/internal/access"
+	"ALLinSSL/backend/public"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,7 +54,7 @@ func requestQiniu(cfg map[string]any, path string, m map[string]any, method stri
 }
 
 
-func DeployQiniuCdn(cfg map[string]any) error {
+func DeployQiniuCdn(cfg map[string]any, logger *public.Logger) error {
 	_, ok := cfg["certificate"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("证书不存在")
@@ -73,6 +74,7 @@ func DeployQiniuCdn(cfg map[string]any) error {
 		if d == "" {
 			continue
 		}
+		logger.Info("正在部署域名: " + d)
 		path := fmt.Sprintf("domain/%v/sslize", d)
 		m := map[string]any{
 			"certid": certId,
@@ -89,7 +91,7 @@ func DeployQiniuCdn(cfg map[string]any) error {
 	return nil
 }
 
-func DeployQiniuOss(cfg map[string]any) error {
+func DeployQiniuOss(cfg map[string]any, logger *public.Logger) error {
 	_, ok := cfg["certificate"].(map[string]any)
 	if !ok {
 		return fmt.Errorf("证书不存在")
@@ -109,6 +111,7 @@ func DeployQiniuOss(cfg map[string]any) error {
 		if d == "" {
 			continue
 		}
+		logger.Info("正在部署域名: " + d)
 		m := map[string]any{
 			"certid": certId,
 			"domain": d,
