@@ -98,6 +98,7 @@ rm -rf static/build/static/css static/build/static/js
 cp -r frontend/apps/allin-ssl/dist/. static/build
 ```
 
+> ⚠️ **注意**：`static/build/static/icons/`、`static/build/static/images/`、`static/build/static/png/` 下的图标与图片文件由 Git 维护，**不会**由 `pnpm build` 生成。切勿执行 `rm -rf static/build` 或 `rm -rf static/build/*` 等全量清除操作，否则这些文件将丢失，需通过 `git checkout HEAD -- static/build/static/icons static/build/static/images static/build/static/png static/build/favicon.ico` 恢复。
 #### 3. 编译后端并启动
 ```bash
 go mod tidy

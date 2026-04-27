@@ -270,18 +270,24 @@ func RunNode(node *WorkflowNode, ctx *ExecutionContext) error {
 	}
 	// 条件分支
 	if node.Type == "execute_result_branch" {
-		//
 		if len(node.ConditionNodes) > 0 {
-			lastStatus := ctx.GetStatus(node.Config["fromNodeId"].(string))
+			// fromNodeId 可能指向条件节点（无实际输出），优先用 _prevNodeId（直接父节点）
+			resolvedFromId := node.Config["fromNodeId"].(string)
+			if prevNodeId, ok := node.Config["_prevNodeId"].(string); ok && prevNodeId != "" {
+				if out, exists := ctx.GetOutput(resolvedFromId); !exists || out == nil {
+					resolvedFromId = prevNodeId
+				}
+			}
+			lastStatus := ctx.GetStatus(resolvedFromId)
 			for _, branch := range node.ConditionNodes {
 				if branch.Config["type"] == string(lastStatus) {
 					if branch.ChildNode != nil {
 						if branch.ChildNode.Config == nil {
 							branch.ChildNode.Config = make(map[string]any)
 						}
-						fromNodeData, ok := ctx.GetOutput(node.Config["fromNodeId"].(string))
-						if !ok {
-							fromNodeData = nil
+						fromNodeData, ok := ctx.GetOutput(resolvedFromId)
+						if !ok || fromNodeData == nil {
+							fromNodeData, _ = node.Config["fromNodeData"].(map[string]any)
 						}
 						branch.ChildNode.Config["fromNodeData"] = fromNodeData
 					}
@@ -301,6 +307,10 @@ func RunNode(node *WorkflowNode, ctx *ExecutionContext) error {
 		fromNodeData, ok := ctx.GetOutput(node.Id)
 		if ok && fromNodeData != nil && node.ChildNode.Config["fromNodeData"] == nil {
 			node.ChildNode.Config["fromNodeData"] = fromNodeData
+		}
+		// 让子节点的 execute_result_branch 能回退到当前节点的状态和输出
+		if node.ChildNode.Type == "execute_result_branch" && node.ChildNode.Config["_prevNodeId"] == nil {
+			node.ChildNode.Config["_prevNodeId"] = node.Id
 		}
 		return RunNode(node.ChildNode, ctx)
 	}

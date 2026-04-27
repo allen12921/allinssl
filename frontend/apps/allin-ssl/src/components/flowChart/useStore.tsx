@@ -272,6 +272,10 @@ export const useFlowStore = defineStore('flow-store', () => {
           default:
             // console.log('其他节点', node, parent)
             if (node.childNode) newNodeData.childNode = node.childNode; // 组件嵌套到 childNode 中
+            // 新节点成为 execute_result_branch 的父节点时，修正 fromNodeId 为新节点的 ID
+            if (newNodeData.childNode?.type === EXECUTE_RESULT_BRANCH && newNodeData.childNode.config) {
+              newNodeData.childNode.config.fromNodeId = newNodeData.id;
+            }
             node.childNode = newNodeData;
             break;
         }
