@@ -1,0 +1,27 @@
+{
+  "name": "upyun",
+  "description": "部署到又拍云SSL证书库",
+  "version": "1.0.0",
+  "author": "allinssl",
+  "config": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "又拍云操作员账号（子账号，非主账号）",
+      "required": true
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "又拍云操作员密码",
+      "required": true
+    }
+  ],
+  "actions": [
+    {
+      "name": "upload",
+      "description": "上传证书到又拍云证书库，并自动迁移已绑定相同域名的旧证书",
+      "params": []
+    }
+  ]
+}
