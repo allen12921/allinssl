@@ -81,7 +81,7 @@ export const useController = () => {
 				(r) => checkedRowKeysRef.value.includes(r.id.toString()) && (r.workflow_refs?.length ?? 0) > 0,
 			)
 			const warning = associated.length
-				? `\n\n注意：其中 ${associated.length} 个证书正被工作流使用，删除后工作流将无法正常运行。`
+				? `\n\n注意：其中 ${associated.length} 个证书正被工作流使用，删除后工作流可能无法正常运行。`
 				: ''
 			useDialog({
 				title: '批量删除证书',
@@ -308,7 +308,7 @@ export const useController = () => {
 	const handleDeleteCert = async (row: CertItem) => {
 		const refs = row.workflow_refs ?? []
 		const content = refs.length
-			? `此证书已被工作流「${refs.map((r) => r.name).join('、')}」使用，删除后工作流将无法正常运行，确认删除？`
+			? `此证书已被工作流「${refs.map((r) => r.name).join('、')}」使用，删除后工作流可能无法正常运行，确认删除？`
 			: $t('t_30_1745227841739')
 		useDialog({
 			title: $t('t_29_1745227838410'),
