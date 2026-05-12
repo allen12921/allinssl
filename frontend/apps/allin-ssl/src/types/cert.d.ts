@@ -8,6 +8,12 @@ export interface CertListParams {
 	status?: number
 }
 
+/** 关联工作流引用 */
+export interface WorkflowRef {
+	id: string
+	name: string
+}
+
 /** 证书项 */
 export interface CertItem {
 	cert: string
@@ -25,6 +31,7 @@ export interface CertItem {
 	start_time: string
 	update_time: string
 	workflow_id: string
+	workflow_refs?: WorkflowRef[]
 }
 
 /** 证书列表响应 */

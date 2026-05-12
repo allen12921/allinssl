@@ -17,6 +17,17 @@ func GetSqlite() (*public.Sqlite, error) {
 	return s, nil
 }
 
+// getWorkflowsBySha256s returns all workflows, used to compute workflow_refs per cert.
+func getWorkflowsBySha256s() ([]map[string]any, error) {
+	s, err := public.NewSqlite("data/data.db", "")
+	if err != nil {
+		return nil, err
+	}
+	s.TableName = "workflow"
+	defer s.Close()
+	return s.Where("1=1", []interface{}{}).Select()
+}
+
 func GetList(search string, p, limit, status int64) ([]map[string]any, int, error) {
 	var data []map[string]any
 	var count int64
@@ -69,6 +80,33 @@ func GetList(search string, p, limit, status int64) ([]map[string]any, int, erro
 		}
 		v["end_day"] = strconv.FormatInt(int64(endtime.Sub(time.Now())/(24*time.Hour)), 10)
 	}
+
+	// Attach workflow_refs to each cert
+	workflows, _ := getWorkflowsBySha256s()
+	for i, c := range data {
+		sha, _ := c["sha256"].(string)
+		wfId := fmt.Sprintf("%v", c["workflow_id"])
+		var refs []map[string]string
+		seen := map[string]bool{}
+		for _, w := range workflows {
+			wid := fmt.Sprintf("%v", w["id"])
+			wname, _ := w["name"].(string)
+			wcontent, _ := w["content"].(string)
+			if seen[wid] {
+				continue
+			}
+			if (wfId != "" && wfId != "<nil>" && wfId == wid) ||
+				(sha != "" && strings.Contains(wcontent, sha)) {
+				refs = append(refs, map[string]string{"id": wid, "name": wname})
+				seen[wid] = true
+			}
+		}
+		if refs == nil {
+			refs = []map[string]string{}
+		}
+		data[i]["workflow_refs"] = refs
+	}
+
 	return data, int(count), nil
 }
 

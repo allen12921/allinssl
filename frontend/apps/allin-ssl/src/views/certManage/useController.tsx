@@ -1,4 +1,4 @@
-import { NButton, NSpace, NTag, type DataTableColumns } from 'naive-ui'
+import { NButton, NSpace, NTag, NTooltip, type DataTableColumns } from 'naive-ui'
 import {
 	useModal,
 	useTable,
@@ -77,9 +77,15 @@ export const useController = () => {
 			return
 		}
 		if (batchActionRef.value === 'delete') {
+			const associated = data.value.filter(
+				(r) => checkedRowKeysRef.value.includes(r.id.toString()) && (r.workflow_refs?.length ?? 0) > 0,
+			)
+			const warning = associated.length
+				? `\n\n注意：其中 ${associated.length} 个证书正被工作流使用，删除后工作流将无法正常运行。`
+				: ''
 			useDialog({
 				title: '批量删除证书',
-				content: `确定要删除选中的 ${checkedRowKeysRef.value.length} 个证书吗？`,
+				content: `确定要删除选中的 ${checkedRowKeysRef.value.length} 个证书吗？${warning}`,
 				onPositiveClick: async () => {
 					try {
 						await deleteBatchCerts(checkedRowKeysRef.value)
@@ -182,6 +188,27 @@ export const useController = () => {
 			width: 150,
 		},
 		{
+			title: '关联工作流',
+			key: 'workflow_refs',
+			width: 120,
+			render: (row: CertItem) => {
+				const refs = row.workflow_refs ?? []
+				if (!refs.length) return null
+				return (
+					<NTooltip trigger="hover">
+						{{
+							trigger: () => (
+								<NTag round type="info" size="small">
+									已关联 ({refs.length})
+								</NTag>
+							),
+							default: () => refs.map((r) => r.name).join('、'),
+						}}
+					</NTooltip>
+				)
+			},
+		},
+		{
 			title: $t('t_8_1745215914610'),
 			key: 'actions',
 			fixed: 'right' as const,
@@ -278,13 +305,17 @@ export const useController = () => {
 	 * @description 删除证书
 	 * @param {CertItem} cert - 证书对象
 	 */
-	const handleDeleteCert = async ({ id }: CertItem) => {
+	const handleDeleteCert = async (row: CertItem) => {
+		const refs = row.workflow_refs ?? []
+		const content = refs.length
+			? `此证书已被工作流「${refs.map((r) => r.name).join('、')}」使用，删除后工作流将无法正常运行，确认删除？`
+			: $t('t_30_1745227841739')
 		useDialog({
 			title: $t('t_29_1745227838410'),
-			content: $t('t_30_1745227841739'),
+			content,
 			onPositiveClick: async () => {
 				try {
-					await deleteExistingCert(id.toString())
+					await deleteExistingCert(row.id.toString())
 					await fetch()
 				} catch (error) {
 					handleError(error)
