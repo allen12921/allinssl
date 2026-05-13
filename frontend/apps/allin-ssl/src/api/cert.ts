@@ -11,10 +11,12 @@ import type {
 	DeleteCertParams,
 	DeleteCertResponse,
 	DownloadCertParams,
-	DownloadCertResponse, // Ensuring this type is imported
+	DownloadCertResponse,
+	UpdateCertParams,
+	UpdateCertResponse,
 	UploadCertParams,
 	UploadCertResponse,
-} from '@/types/cert' // Path alias and sorted types
+} from '@/types/cert'
 
 // Relative internal imports
 import { useApi } from '@api/index'
@@ -42,6 +44,12 @@ export const applyCert = (params?: ApplyCertParams): useAxiosReturn<ApplyCertRes
  */
 export const uploadCert = (params?: UploadCertParams): useAxiosReturn<UploadCertResponse, UploadCertParams> =>
 	useApi<UploadCertResponse, UploadCertParams>('/v1/cert/upload_cert', params)
+
+/**
+ * @description 更新证书
+ */
+export const updateCert = (params: UpdateCertParams): useAxiosReturn<UpdateCertResponse, UpdateCertParams> =>
+	useApi<UpdateCertResponse, UpdateCertParams>('/v1/cert/update_cert', params)
 
 /**
  * @description 删除证书

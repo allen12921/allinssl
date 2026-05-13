@@ -247,6 +247,164 @@ func SaveCert(source, key, cert, issuerCert, historyId string) (string, error) {
 	return sha256, nil
 }
 
+func UpdateCert(id, certPEM, keyPEM string) (oldSha256, newSha256 string, err error) {
+	if err = public.ValidateSSLCertificate(certPEM, keyPEM); err != nil {
+		return
+	}
+	certObj, err := public.ParseCertificate([]byte(certPEM))
+	if err != nil {
+		err = fmt.Errorf("解析证书失败: %v", err)
+		return
+	}
+	newSha256, err = public.GetSHA256(certPEM)
+	if err != nil {
+		err = fmt.Errorf("获取 SHA256 失败: %v", err)
+		return
+	}
+
+	// 读取当前记录，校验 source 必须为 upload
+	s, err := GetSqlite()
+	if err != nil {
+		return
+	}
+	defer s.Close()
+	rows, err := s.Where("id=?", []interface{}{id}).Select()
+	if err != nil || len(rows) == 0 {
+		err = fmt.Errorf("证书不存在")
+		return
+	}
+	if source, _ := rows[0]["source"].(string); source != "upload" {
+		err = fmt.Errorf("仅支持编辑手动上传的证书")
+		return
+	}
+	oldSha256, _ = rows[0]["sha256"].(string)
+
+	// 解析新证书元数据
+	domainSet := make(map[string]bool)
+	if certObj.Subject.CommonName != "" {
+		domainSet[certObj.Subject.CommonName] = true
+	}
+	for _, dns := range certObj.DNSNames {
+		domainSet[dns] = true
+	}
+	for _, ip := range certObj.IPAddresses {
+		domainSet[ip.String()] = true
+	}
+	var domains []string
+	for d := range domainSet {
+		domains = append(domains, d)
+	}
+	caName := "UNKNOWN"
+	if len(certObj.Issuer.Organization) > 0 {
+		caName = certObj.Issuer.Organization[0]
+	} else if certObj.Issuer.CommonName != "" {
+		caName = certObj.Issuer.CommonName
+	}
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	_, err = s.Where("id=?", []interface{}{id}).Update(map[string]interface{}{
+		"cert":        certPEM,
+		"key":         keyPEM,
+		"sha256":      newSha256,
+		"domains":     strings.Join(domains, ","),
+		"issuer":      caName,
+		"start_time":  certObj.NotBefore.Format("2006-01-02 15:04:05"),
+		"end_time":    certObj.NotAfter.Format("2006-01-02 15:04:05"),
+		"end_day":     fmt.Sprintf("%d", int(certObj.NotAfter.Sub(time.Now()).Hours()/24)),
+		"update_time": now,
+	})
+	if err != nil {
+		return
+	}
+
+	// 把所有 workflow content 中的旧 sha256 替换为新 sha256
+	if oldSha256 != "" && oldSha256 != newSha256 {
+		ws, _ := getWorkflowsBySha256s()
+		for _, w := range ws {
+			content, _ := w["content"].(string)
+			if !strings.Contains(content, oldSha256) {
+				continue
+			}
+			newContent := strings.ReplaceAll(content, oldSha256, newSha256)
+			wid := fmt.Sprintf("%v", w["id"])
+			sw, e2 := public.NewSqlite("data/data.db", "")
+			if e2 != nil {
+				continue
+			}
+			sw.TableName = "workflow"
+			sw.Where("id=?", []interface{}{wid}).Update(map[string]interface{}{"content": newContent})
+			sw.Close()
+		}
+	}
+	return
+}
+
+// GetWorkflowRefs returns workflows associated with a cert identified by its db id and sha256.
+func GetWorkflowRefs(id, sha256 string) []map[string]string {
+	s, err := GetSqlite()
+	if err != nil {
+		return []map[string]string{}
+	}
+	rows, err := s.Where("id=?", []interface{}{id}).Select()
+	s.Close()
+	if err != nil || len(rows) == 0 {
+		return []map[string]string{}
+	}
+	wfId := fmt.Sprintf("%v", rows[0]["workflow_id"])
+
+	// latest cert per workflow_id (same logic as GetList)
+	latestCertForWorkflow := map[string]int64{}
+	if sc, e2 := GetSqlite(); e2 == nil {
+		if all, e3 := sc.Field([]string{"id", "workflow_id"}).Where("workflow_id != '' AND workflow_id != 'null'", []interface{}{}).Select(); e3 == nil {
+			for _, c := range all {
+				wfid := fmt.Sprintf("%v", c["workflow_id"])
+				if wfid == "" || wfid == "<nil>" {
+					continue
+				}
+				var cid int64
+				switch v := c["id"].(type) {
+				case int64:
+					cid = v
+				case int:
+					cid = int64(v)
+				}
+				if prev, ok := latestCertForWorkflow[wfid]; !ok || cid > prev {
+					latestCertForWorkflow[wfid] = cid
+				}
+			}
+		}
+		sc.Close()
+	}
+	var certId int64
+	switch v := rows[0]["id"].(type) {
+	case int64:
+		certId = v
+	case int:
+		certId = int64(v)
+	}
+
+	workflows, _ := getWorkflowsBySha256s()
+	var refs []map[string]string
+	seen := map[string]bool{}
+	for _, w := range workflows {
+		wid := fmt.Sprintf("%v", w["id"])
+		wname, _ := w["name"].(string)
+		wcontent, _ := w["content"].(string)
+		if seen[wid] {
+			continue
+		}
+		isLatest := wfId != "" && wfId != "<nil>" && wfId == wid && certId == latestCertForWorkflow[wfId]
+		if isLatest || (sha256 != "" && strings.Contains(wcontent, sha256)) {
+			refs = append(refs, map[string]string{"id": wid, "name": wname})
+			seen[wid] = true
+		}
+	}
+	if refs == nil {
+		return []map[string]string{}
+	}
+	return refs
+}
+
 func UploadCert(key, cert string) (string, error) {
 	sha256, err := SaveCert("upload", key, cert, "", "")
 	if err != nil {

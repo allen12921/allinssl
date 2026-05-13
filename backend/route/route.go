@@ -83,6 +83,7 @@ func Register(r *gin.Engine) {
 	{
 		cert.POST("/get_list", api.GetCertList)
 		cert.POST("/upload_cert", api.UploadCert)
+		cert.POST("/update_cert", api.UpdateCert)
 		cert.POST("/del_cert", api.DelCert)
 		cert.GET("/download", api.DownloadCert)
 	}

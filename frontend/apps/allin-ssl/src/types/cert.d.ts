@@ -65,6 +65,20 @@ export interface UploadCertResponse extends AxiosResponseData {
 	data: string
 }
 
+/** 更新证书请求参数 */
+export interface UpdateCertParams {
+	id: string
+	cert: string
+	key: string
+}
+
+/** 更新证书响应 */
+export interface UpdateCertResponse extends AxiosResponseData {
+	data: {
+		associated_workflows: WorkflowRef[]
+	}
+}
+
 /** 删除证书请求参数 */
 export interface DeleteCertParams {
 	id: string

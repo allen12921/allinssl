@@ -14,14 +14,14 @@ import { useError } from '@baota/hooks/error'
 import { $t } from '@locales/index'
 import { getDaysDiff } from '@baota/utils/date'
 
+import { executeWorkflow } from '@/api/workflow'
 import { useStore } from './useStore'
 
 import type { CertItem, CertListParams } from '@/types/cert'
 
 const { handleError } = useError()
 const { useFormTextarea } = useFormHooks()
-const { fetchCertList, downloadExistingCert, deleteExistingCert, uploadNewCert, uploadForm, resetUploadForm, deleteBatchCerts } =
-	useStore()
+const { fetchCertList, downloadExistingCert, deleteExistingCert, uploadNewCert, updateExistingCert, uploadForm, resetUploadForm, deleteBatchCerts } = useStore()
 const { confirm } = useModalHooks()
 /**
  * 计算证书剩余天数
@@ -213,12 +213,17 @@ export const useController = () => {
 			key: 'actions',
 			fixed: 'right' as const,
 			align: 'right',
-			width: 200,
+			width: 260,
 			render: (row: CertItem) => (
 				<NSpace justify="end">
 					<NButton size="tiny" strong secondary type="primary" class="table-action-btn" onClick={() => openViewModal(row)}>
 						查看
 					</NButton>
+					{row.source === 'upload' && (
+						<NButton size="tiny" strong secondary type="warning" class="table-action-btn" onClick={() => openEditModal(row)}>
+							编辑
+						</NButton>
+					)}
 					<NButton size="tiny" strong secondary type="primary" class="table-action-btn" onClick={() => downloadExistingCert(row.id.toString())}>
 						{$t('t_25_1745227838080')}
 					</NButton>
@@ -337,6 +342,21 @@ export const useController = () => {
 				return <ViewCertForm labelPlacement="top" />
 			},
 			footer: false,
+		})
+	}
+
+	const openEditModal = (cert: CertItem) => {
+		useModal({
+			title: '编辑证书',
+			area: 600,
+			component: () => {
+				const { EditCertForm } = useEditCertController(cert)
+				return <EditCertForm labelPlacement="top" />
+			},
+			footer: true,
+			onUpdateShow: (show) => {
+				if (!show) fetch()
+			},
 		})
 	}
 
@@ -474,5 +494,62 @@ export const useViewCertController = (cert: CertItem) => {
 
 	return {
 		ViewCertForm: component,
+	}
+}
+
+/**
+ * @description 编辑证书控制器（仅限手动上传的证书）
+ * @param {CertItem} cert - 证书对象
+ */
+export const useEditCertController = (cert: CertItem) => {
+	const { open: openLoad, close: closeLoad } = useLoadingMask({ text: '正在更新证书...' })
+	const editForm = ref({ cert: cert.cert, key: cert.key })
+
+	const { component, fetch } = useForm({
+		config: [
+			useFormTextarea($t('t_34_1745227839375'), 'cert', { placeholder: $t('t_35_1745227839208'), rows: 8 }),
+			useFormTextarea($t('t_36_1745227838958'), 'key', { placeholder: $t('t_37_1745227839669'), rows: 8 }),
+		],
+		request: async (params: { cert: string; key: string }) => {
+			return updateExistingCert({ id: cert.id.toString(), cert: params.cert, key: params.key })
+		},
+		defaultValue: editForm,
+		rules: {
+			cert: [{ required: true, message: $t('t_35_1745227839208'), trigger: 'input' }],
+			key: [{ required: true, message: $t('t_37_1745227839669'), trigger: 'input' }],
+		},
+	})
+
+	confirm(async (close) => {
+		try {
+			openLoad()
+			const associated = await fetch()
+			close()
+			if (associated && (associated as any[]).length > 0) {
+				const names = (associated as Array<{ id: string; name: string }>).map((w) => w.name).join('、')
+				useDialog({
+					title: '证书已更新',
+					content: `检测到以下工作流使用了此证书：${names}，是否立即触发执行？`,
+					confirmText: '立即执行',
+					cancelText: '稍后',
+					onPositiveClick: async () => {
+						for (const w of associated as Array<{ id: string; name: string }>) {
+							try {
+								const { fetch: run } = executeWorkflow({ id: w.id })
+								await run()
+							} catch (_) {}
+						}
+					},
+				})
+			}
+		} catch (error) {
+			handleError(error)
+		} finally {
+			closeLoad()
+		}
+	})
+
+	return {
+		EditCertForm: component,
 	}
 }
