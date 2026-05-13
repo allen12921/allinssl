@@ -113,8 +113,9 @@ export const useCertManageStore = defineStore('cert-manage-store', () => {
 	 * @returns 关联的工作流列表
 	 */
 	const updateExistingCert = async (params: UpdateCertParams): Promise<WorkflowRef[]> => {
-		const { data, fetch } = updateCert(params)
+		const { data, response, fetch } = updateCert(params)
 		await fetch()
+		if (!response.value) throw new Error('证书更新失败')
 		return data.value?.data?.associated_workflows ?? []
 	}
 

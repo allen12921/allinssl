@@ -542,8 +542,8 @@ export const useEditCertController = (cert: CertItem) => {
 					},
 				})
 			}
-		} catch (error) {
-			handleError(error)
+		} catch (_) {
+			// API error already displayed by handleApiError in useAxios; modal stays open
 		} finally {
 			closeLoad()
 		}

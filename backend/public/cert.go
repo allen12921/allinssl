@@ -19,6 +19,7 @@ import (
 	"time"
 )
 
+
 // **解析 PEM 格式的证书**
 func ParseCertificate(certPEM []byte) (*x509.Certificate, error) {
 	block, _ := pem.Decode(certPEM)
@@ -101,6 +102,48 @@ func VerifyCertificateAndKey(cert *x509.Certificate, privateKey crypto.PrivateKe
 	return err
 }
 
+// ValidateCertificateChain verifies that a multi-cert PEM forms a valid chain.
+// Single-cert input is always accepted (no chain to verify).
+func ValidateCertificateChain(certStr string) error {
+	var certs []*x509.Certificate
+	data := []byte(certStr)
+	for {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		c, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return fmt.Errorf("证书链中包含无效证书: %v", err)
+		}
+		certs = append(certs, c)
+	}
+	// pem.Decode returns nil when no more PEM blocks are found; any remaining
+	// non-whitespace bytes indicate a truncated or malformed block.
+	if len(strings.TrimSpace(string(data))) > 0 {
+		return fmt.Errorf("证书链包含无法解析的数据，请检查 PEM 格式")
+	}
+	if len(certs) <= 1 {
+		return nil
+	}
+	// Verify time validity for every cert in the chain, not just the leaf.
+	for i, c := range certs {
+		if err := CheckCertificateExpiration(c); err != nil {
+			return fmt.Errorf("证书链第 %d 个证书有效期异常: %v", i+1, err)
+		}
+	}
+	for i := 0; i < len(certs)-1; i++ {
+		if err := certs[i].CheckSignatureFrom(certs[i+1]); err != nil {
+			return fmt.Errorf("证书链验证失败：第 %d 个证书与上级签发者不匹配", i+1)
+		}
+	}
+	return nil
+}
+
 // **主验证函数**
 func ValidateSSLCertificate(certStr, keyStr string) error {
 	certPEM, keyPEM := []byte(certStr), []byte(keyStr)
@@ -122,6 +165,11 @@ func ValidateSSLCertificate(certStr, keyStr string) error {
 	// **检查证书和私钥是否匹配**
 	if err := VerifyCertificateAndKey(cert, privateKey); err != nil {
 		return fmt.Errorf("证书与私钥不匹配: %v", err)
+	}
+
+	// **检查证书链完整性**
+	if err := ValidateCertificateChain(certStr); err != nil {
+		return err
 	}
 
 	return nil
