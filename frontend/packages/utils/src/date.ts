@@ -24,10 +24,12 @@ export const formatDate = (
 
   // 使用Ramda创建日期映射
   const dateMap = R.zipObj(
-    ["yyyy", "MM", "dd", "HH", "mm", "ss"],
+    ["yyyy", "YYYY", "MM", "dd", "DD", "HH", "mm", "ss"],
     [
       timestamp.getFullYear(),
+      timestamp.getFullYear(),
       timestamp.getMonth() + 1,
+      timestamp.getDate(),
       timestamp.getDate(),
       timestamp.getHours(),
       timestamp.getMinutes(),
@@ -41,7 +43,7 @@ export const formatDate = (
       const value = dateMap[key as keyof typeof dateMap];
       // 将单位数的月、日、时、分、秒前面补0
       const formattedValue =
-        key !== "yyyy" && value < 10 ? `0${value}` : `${value}`;
+        key !== "yyyy" && key !== "YYYY" && value < 10 ? `0${value}` : `${value}`;
       // 使用正则表达式全局替换所有匹配项
       return result.replace(new RegExp(key, "g"), formattedValue);
     },

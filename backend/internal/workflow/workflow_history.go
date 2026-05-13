@@ -136,15 +136,26 @@ func CleanWorkflowHistory() error {
 	}
 	workflowIdsStr := strings.Join(workflowIds, ",")
 	s.TableName = "workflow_history"
-	// 获取无意义的工作流记录id
-	data, err = s.Where("workflow_id NOT IN ("+workflowIdsStr+")", nil).Select()
-	if err != nil {
-		return err
-	}
-	// 删除无意义的工作流记录
-	_, err = s.Where("workflow_id NOT IN ("+workflowIdsStr+")", nil).Delete()
-	if err != nil {
-		return err
+	if workflowIdsStr == "" {
+		data, err = s.Select()
+		if err != nil {
+			return err
+		}
+		_, err = s.Delete()
+		if err != nil {
+			return err
+		}
+	} else {
+		// 获取无意义的工作流记录id
+		data, err = s.Where("workflow_id NOT IN ("+workflowIdsStr+")", nil).Select()
+		if err != nil {
+			return err
+		}
+		// 删除无意义的工作流记录
+		_, err = s.Where("workflow_id NOT IN ("+workflowIdsStr+")", nil).Delete()
+		if err != nil {
+			return err
+		}
 	}
 	// 删除工作流执行日志
 	logPath := public.GetSettingIgnoreError("workflow_log_path")
@@ -166,13 +177,29 @@ func CleanWorkflowHistory() error {
 
 // DelWorkflowHistory 删除工作流执行历史记录
 func DelWorkflowHistory(ids string) error {
-	idArr := strings.Split(ids, ",")
+	rawIDs := strings.Split(ids, ",")
+	idArr := make([]string, 0, len(rawIDs))
+	for _, id := range rawIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			idArr = append(idArr, id)
+		}
+	}
+	if len(idArr) == 0 {
+		return nil
+	}
 	s, err := GetSqliteObjWH()
 	if err != nil {
 		return err
 	}
 	defer s.Close()
-	_, err = s.Where("id IN ('"+strings.Join(idArr, "','")+"')", nil).Delete()
+	placeholders := make([]string, len(idArr))
+	params := make([]interface{}, len(idArr))
+	for i, id := range idArr {
+		placeholders[i] = "?"
+		params[i] = id
+	}
+	_, err = s.Where("id IN ("+strings.Join(placeholders, ",")+")", params).Delete()
 	if err != nil {
 		return err
 	}

@@ -175,7 +175,7 @@ func CreateLeafCert(caId, usage, keyBits, validDays int64, cn, san string) (*Lea
 		return nil, err
 	}
 	if len(issuers) == 0 {
-		return nil, fmt.Errorf("issuer with id %d not found", caId)
+		return nil, fmt.Errorf("issuer with id %d not found", int64(caId))
 	}
 	issuer := issuers[0]
 	if issuer["root_id"] == "" || issuer["root_id"] == nil {
@@ -331,7 +331,7 @@ func WorkflowCreateLeafCert(params map[string]any, logger *public.Logger) (map[s
 		return nil, err
 	}
 	if len(issuers) == 0 {
-		return nil, fmt.Errorf("issuer with id %d not found", caId)
+		return nil, fmt.Errorf("issuer with id %.0f not found", caId)
 	}
 	issuer := issuers[0]
 	if issuer["root_id"] == "" || issuer["root_id"] == nil {

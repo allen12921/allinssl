@@ -33,16 +33,27 @@ const encryptPassword = (password: string): string => {
 const getRememberData = (): LoginParams | null => {
 	const loginDataInfo = localStorage.getItem('loginData')
 	if (!loginDataInfo) return null
-	return JSON.parse(loginDataInfo) as LoginParams // 添加类型断言
+	let data: Partial<LoginParams>
+	try {
+		data = JSON.parse(loginDataInfo) as Partial<LoginParams>
+	} catch {
+		localStorage.removeItem('loginData')
+		return null
+	}
+	return {
+		username: data.username ?? '',
+		password: '',
+		code: '',
+	}
 }
 
 /**
  * @description 设置记住的登录数据
  * @param username - 用户名
- * @param password - 密码 (明文，存储前加密)
+ * @param password - 保留参数以兼容调用方，不会持久化密码
  */
-const setRememberData = (username: string, password: string): void => {
-	localStorage.setItem('loginData', JSON.stringify({ username, password }))
+const setRememberData = (username: string, _password: string): void => {
+	localStorage.setItem('loginData', JSON.stringify({ username }))
 }
 
 // ==================== Controller 类型定义 ====================
@@ -85,7 +96,7 @@ export const useController = (): LoginControllerExposes => {
 			// 处理记住密码逻辑
 			if (rememberMe.value && !error.value) {
 				// 登录成功且勾选了记住密码
-				setRememberData(params.username, params.password) // 存储原始密码以便回填
+				setRememberData(params.username, params.password)
 			} else if (error.value) {
 				// 登录失败
 				loginData.value.password = '' // 清空密码框
@@ -156,7 +167,7 @@ export const useController = (): LoginControllerExposes => {
 			const rememberedData = getRememberData() // 获取记住的登录数据
 			if (rememberedData) {
 				loginData.value.username = rememberedData.username
-				loginData.value.password = rememberedData.password // 回填原始密码
+				loginData.value.password = ''
 			}
 		}
 	})

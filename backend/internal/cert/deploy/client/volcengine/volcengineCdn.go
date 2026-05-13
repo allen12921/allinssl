@@ -21,7 +21,7 @@ func createSdkSession(ak, sk, region string) (*session.Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("创建火山引擎客户端失败: %w", err)
 	}
-	
+
 	return sess, err
 }
 
@@ -44,10 +44,10 @@ func (v *VolcEngineCdnClient) IUploadCert(certContent, certKey string) (string, 
 		Repeatable:  volcengine.Bool(false),
 		Source:      volcengine.String("volc_cert_center"),
 	}
-	
+
 	output, err := v.AddCertificate(input)
 	if err != nil {
-		if output.Metadata.Error.Code == "InvalidParameter.Certificate.Duplicated" {
+		if output != nil && output.Metadata != nil && output.Metadata.Error != nil && output.Metadata.Error.Code == "InvalidParameter.Certificate.Duplicated" {
 			re := regexp.MustCompile(`cert-[a-f0-9]{32}`)
 			certId := re.FindString(output.Metadata.Error.Message)
 			fmt.Printf("相同证书已存在 certId:%s\n", certId)
@@ -63,7 +63,7 @@ func (v *VolcEngineCdnClient) IBatchDeployCert(certId, domain string) error {
 		CertId: volcengine.String(certId),
 		Domain: volcengine.String(domain),
 	}
-	
+
 	res, err := v.BatchDeployCert(batchDeployCertInput)
 	if err != nil {
 		return fmt.Errorf("部署证书失败: %w", err)

@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type SSHConfig struct {
@@ -27,6 +28,10 @@ type SSHConfig struct {
 type RemoteFile struct {
 	Path    string
 	Content string
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func buildAuthMethods(password, privateKey string) ([]ssh.AuthMethod, error) {
@@ -148,7 +153,8 @@ func writeMultipleFilesViaSSH(config SSHConfig, files []RemoteFile, preCmd, post
 	// 如果 SFTP 上传失败，改用 ssh 命令上传文件
 	if uploadErr != nil {
 		for _, file := range files {
-			mkdirCmd := fmt.Sprintf("mkdir -p $(dirname %q)", file.Path)
+			quotedPath := shellQuote(file.Path)
+			mkdirCmd := fmt.Sprintf("mkdir -p -- \"$(dirname -- %s)\"", quotedPath)
 			stdout, stderr, err := runSSHCommand(client, mkdirCmd)
 			logger.Debug("[mkdir 命令 STDOUT]", stdout)
 			logger.Debug("[mkdir 命令 STDERR]", stderr)
@@ -157,7 +163,7 @@ func writeMultipleFilesViaSSH(config SSHConfig, files []RemoteFile, preCmd, post
 			}
 
 			contentBase64 := base64.StdEncoding.EncodeToString([]byte(file.Content))
-			writeCmd := fmt.Sprintf("echo %s | base64 -d > %s", contentBase64, file.Path)
+			writeCmd := fmt.Sprintf("printf %%s %s | base64 -d > %s", shellQuote(contentBase64), quotedPath)
 			stdout, stderr, err = runSSHCommand(client, writeCmd)
 			logger.Debug("[写文件命令 STDOUT]", stdout)
 			logger.Debug("[写文件命令 STDERR]", stderr)

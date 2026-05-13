@@ -3,6 +3,7 @@
  */
 
 import * as R from 'ramda'
+import md5 from 'md5'
 import { isArray } from './type'
 
 /* -------------- 1、常用正则验证 -------------- */
@@ -297,10 +298,9 @@ export type ProxyConfig = {
  * @param {string} usage 使用场景 "query" | "params"
  * @returns {Object} 返回对象包含 request_time 和 request_token
  */
-export const getProxyConfig = async (proxyKey: string, usage: 'query' | 'params' = 'params') => {
-	const md5 = await import('md5')
+export const getProxyConfig = (proxyKey: string, usage: 'query' | 'params' = 'params') => {
 	const request_time = Date.now()
-	const request_token = md5.default(String(request_time).concat(md5.default(proxyKey)))
+	const request_token = md5(String(request_time).concat(md5(proxyKey)))
 	if (usage === 'params') {
 		return { request_time, request_token, requestTime: request_time, requestToken: request_token }
 	}

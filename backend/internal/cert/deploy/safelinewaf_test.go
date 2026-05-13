@@ -49,7 +49,7 @@ func TestGetSafeLineWAFSiteList(t *testing.T) {
 func TestSafeLineWAFPortalGet(t *testing.T) {
 	res, err := GetSafeLineWafPortalConfig("1")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatalf("%s", err.Error())
 		return
 	}
 	fmt.Println(res)

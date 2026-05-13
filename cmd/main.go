@@ -89,7 +89,7 @@ func main() {
 	case "start":
 		mainRun()
 	case "help":
-		fmt.Println(`
+		fmt.Print(`
 ALLinSSL 管理命令:
 start - 启动 ALLinSSL
 1 - 后台运行 ALLinSSL（仅支持linux）

@@ -254,8 +254,8 @@ func RunNode(node *WorkflowNode, ctx *ExecutionContext) error {
 				wg.Add(1)
 				go func(node *WorkflowNode) {
 					defer wg.Done()
-					if err = RunNode(node, ctx); err != nil {
-						errChan <- err
+					if runErr := RunNode(node, ctx); runErr != nil {
+						errChan <- runErr
 					}
 				}(branch)
 			}
@@ -272,7 +272,10 @@ func RunNode(node *WorkflowNode, ctx *ExecutionContext) error {
 	if node.Type == "execute_result_branch" {
 		if len(node.ConditionNodes) > 0 {
 			// fromNodeId 可能指向条件节点（无实际输出），优先用 _prevNodeId（直接父节点）
-			resolvedFromId := node.Config["fromNodeId"].(string)
+			resolvedFromId, _ := node.Config["fromNodeId"].(string)
+			if resolvedFromId == "" {
+				return fmt.Errorf("条件分支缺少 fromNodeId")
+			}
 			if prevNodeId, ok := node.Config["_prevNodeId"].(string); ok && prevNodeId != "" {
 				if out, exists := ctx.GetOutput(resolvedFromId); !exists || out == nil {
 					resolvedFromId = prevNodeId

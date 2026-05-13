@@ -25,7 +25,7 @@ func TestQiniuUploadCert(t *testing.T) {
 		},
 	}
 	certId, _ := uploadQiniuCert(cfg)
-	t.Logf(certId)
+	t.Log(certId)
 
 }
 

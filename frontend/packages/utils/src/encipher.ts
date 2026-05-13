@@ -2,7 +2,7 @@
  * 文件定义：加密解密
  */
 
-// import JSEncrypt from 'jsencrypt'
+import { JSEncrypt } from 'jsencrypt'
 /* -------------- 1、加密解密 -------------- */
 
 /**
@@ -10,7 +10,6 @@
  * @returns {{ publicKey: string, privateKey: string }} 包含公钥和私钥的对象
  */
 export const generateKeyPair = async () => {
-	const { JSEncrypt } = await import('jsencrypt')
 	const encrypt = new JSEncrypt({ default_key_size: '2048' })
 	encrypt.getKey()
 
@@ -26,8 +25,7 @@ export const generateKeyPair = async () => {
  * @param {string} publicKey - 公钥
  * @returns {string} 加密后的字符串
  */
-export const rsaEncrypt = async (str: string, publicKey: string): Promise<string> => {
-	const { JSEncrypt } = await import('jsencrypt')
+export const rsaEncrypt = (str: string, publicKey: string): string => {
 	// 基础验证
 	if (!str || !publicKey || publicKey.length < 10) return str
 	// 检查字符串长度（2048位RSA密钥最大可加密245字节）
@@ -61,9 +59,7 @@ export const rsaEncrypt = async (str: string, publicKey: string): Promise<string
  * @param {string} privateKey - 私钥
  * @returns {string} 解密后的字符串
  */
-export const rsaDecrypt = async (str: string, privateKey: string): Promise<string> => {
-	const { JSEncrypt } = await import('jsencrypt')
-
+export const rsaDecrypt = (str: string, privateKey: string): string => {
 	// 基础验证
 	if (!str || !privateKey || privateKey.length < 10) return str
 
