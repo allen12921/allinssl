@@ -208,25 +208,7 @@ func SaveCert(source, key, cert, issuerCert, historyId string) (string, error) {
 		return sha256, nil
 	}
 
-	domainSet := make(map[string]bool)
-
-	if certObj.Subject.CommonName != "" {
-		domainSet[certObj.Subject.CommonName] = true
-	}
-	for _, dns := range certObj.DNSNames {
-		domainSet[dns] = true
-	}
-	// 处理 IP 地址
-	for _, ip := range certObj.IPAddresses {
-		domainSet[ip.String()] = true
-	}
-
-	// 转成切片并拼接成逗号分隔的字符串
-	var domains []string
-	for domain := range domainSet {
-		domains = append(domains, domain)
-	}
-	domainList := strings.Join(domains, ",")
+	domainList := strings.Join(public.ExtractCertDomains(certObj), ",")
 
 	// 提取 CA 名称（Issuer 的组织名）
 	caName := "UNKNOWN"
@@ -247,7 +229,10 @@ func SaveCert(source, key, cert, issuerCert, historyId string) (string, error) {
 	return sha256, nil
 }
 
-func UpdateCert(id, certPEM, keyPEM string) (oldSha256, newSha256 string, err error) {
+// UpdateCert 更新一张手动上传（source=="upload"）的证书。
+// 契约：返回 len(uncovered) > 0 且 err == nil 时，表示新证书域名未覆盖原证书域名，
+// 证书「未写库」，需用户确认后带 force=true 重试；此时 newSha256 为空。
+func UpdateCert(id, certPEM, keyPEM string, force bool) (oldSha256, newSha256 string, uncovered []string, err error) {
 	if err = public.ValidateSSLCertificate(certPEM, keyPEM); err != nil {
 		return
 	}
@@ -280,20 +265,29 @@ func UpdateCert(id, certPEM, keyPEM string) (oldSha256, newSha256 string, err er
 	oldSha256, _ = rows[0]["sha256"].(string)
 
 	// 解析新证书元数据
-	domainSet := make(map[string]bool)
-	if certObj.Subject.CommonName != "" {
-		domainSet[certObj.Subject.CommonName] = true
+	domains := public.ExtractCertDomains(certObj)
+
+	// 校验新证书域名是否覆盖原证书域名，未覆盖且未强制时提前返回（不做任何变更）。
+	// 以重新解析旧证书 PEM 为准（真源），而非信任去规范化的 domains 缓存列；
+	// 仅当旧证书缺失/解析失败时才回退到缓存列。
+	if !force {
+		var oldDomains []string
+		if oldCertPEM, _ := rows[0]["cert"].(string); oldCertPEM != "" {
+			if oldObj, e := public.ParseCertificate([]byte(oldCertPEM)); e == nil {
+				oldDomains = public.ExtractCertDomains(oldObj)
+			}
+		}
+		if oldDomains == nil {
+			oldDomainsStr, _ := rows[0]["domains"].(string)
+			oldDomains = strings.Split(oldDomainsStr, ",")
+		}
+		uncovered = public.UncoveredDomains(domains, oldDomains)
+		if len(uncovered) > 0 {
+			newSha256 = "" // 未写库，不返回 sha（契约见函数注释）
+			return
+		}
 	}
-	for _, dns := range certObj.DNSNames {
-		domainSet[dns] = true
-	}
-	for _, ip := range certObj.IPAddresses {
-		domainSet[ip.String()] = true
-	}
-	var domains []string
-	for d := range domainSet {
-		domains = append(domains, d)
-	}
+
 	caName := "UNKNOWN"
 	if len(certObj.Issuer.Organization) > 0 {
 		caName = certObj.Issuer.Organization[0]

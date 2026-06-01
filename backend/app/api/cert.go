@@ -5,7 +5,6 @@ import (
 	"ALLinSSL/backend/public"
 	"archive/zip"
 	"bytes"
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"strings"
 )
@@ -63,9 +62,10 @@ func UploadCert(c *gin.Context) {
 
 func UpdateCert(c *gin.Context) {
 	var form struct {
-		ID   string `form:"id"`
-		Cert string `form:"cert"`
-		Key  string `form:"key"`
+		ID    string `form:"id"`
+		Cert  string `form:"cert"`
+		Key   string `form:"key"`
+		Force bool   `form:"force"`
 	}
 	if err := c.Bind(&form); err != nil {
 		public.FailMsg(c, err.Error())
@@ -77,9 +77,18 @@ func UpdateCert(c *gin.Context) {
 		public.FailMsg(c, "参数不能为空")
 		return
 	}
-	_, newSha256, err := cert.UpdateCert(form.ID, form.Cert, form.Key)
+	_, newSha256, uncovered, err := cert.UpdateCert(form.ID, form.Cert, form.Key, form.Force)
 	if err != nil {
 		public.FailMsg(c, err.Error())
+		return
+	}
+
+	// 新证书未覆盖原证书域名：返回需确认信号，由前端提示用户后带 force 重提交
+	if len(uncovered) > 0 {
+		public.SuccessData(c, map[string]any{
+			"needs_confirmation": true,
+			"uncovered_domains":  uncovered,
+		}, 0)
 		return
 	}
 
@@ -87,7 +96,6 @@ func UpdateCert(c *gin.Context) {
 	public.SuccessData(c, map[string]any{
 		"associated_workflows": associated,
 	}, 0)
-	_ = fmt.Sprintf("") // keep fmt import
 }
 
 func DelCert(c *gin.Context) {

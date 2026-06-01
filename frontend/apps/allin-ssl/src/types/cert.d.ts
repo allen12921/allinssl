@@ -70,14 +70,25 @@ export interface UpdateCertParams {
 	id: string
 	cert: string
 	key: string
+	/** 强制更新：跳过新证书域名覆盖原证书域名的校验 */
+	force?: boolean
 }
 
 /** 更新证书响应 */
 export interface UpdateCertResponse extends AxiosResponseData {
 	data: {
-		associated_workflows: WorkflowRef[]
+		associated_workflows?: WorkflowRef[]
+		/** 新证书未覆盖原证书域名时为 true */
+		needs_confirmation?: boolean
+		/** 未被新证书覆盖的原证书域名 */
+		uncovered_domains?: string[]
 	}
 }
+
+/** updateExistingCert 的归一化返回结果 */
+export type UpdateCertResult =
+	| { needsConfirmation: true; uncoveredDomains: string[] }
+	| { needsConfirmation: false; associatedWorkflows: WorkflowRef[] }
 
 /** 删除证书请求参数 */
 export interface DeleteCertParams {

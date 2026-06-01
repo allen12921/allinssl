@@ -2,7 +2,13 @@ import { defineStore, storeToRefs } from 'pinia'
 import { getCertList, uploadCert, deleteCert, updateCert } from '@/api/cert'
 import { useError } from '@baota/hooks/error'
 import { $t } from '@locales/index'
-import type { CertItem, UploadCertParams, UpdateCertParams, WorkflowRef, CertListParams } from '@/types/cert'
+import type {
+	CertItem,
+	UploadCertParams,
+	UpdateCertParams,
+	UpdateCertResult,
+	CertListParams,
+} from '@/types/cert'
 import type { TableResponse } from '@baota/naive-ui/types/table'
 
 // 导入错误处理钩子
@@ -112,11 +118,15 @@ export const useCertManageStore = defineStore('cert-manage-store', () => {
 	 * 更新证书内容
 	 * @returns 关联的工作流列表
 	 */
-	const updateExistingCert = async (params: UpdateCertParams): Promise<WorkflowRef[]> => {
+	const updateExistingCert = async (params: UpdateCertParams): Promise<UpdateCertResult> => {
 		const { data, response, fetch } = updateCert(params)
 		await fetch()
 		if (!response.value) throw new Error('证书更新失败')
-		return data.value?.data?.associated_workflows ?? []
+		const d = data.value?.data
+		if (d?.needs_confirmation) {
+			return { needsConfirmation: true, uncoveredDomains: d.uncovered_domains ?? [] }
+		}
+		return { needsConfirmation: false, associatedWorkflows: d?.associated_workflows ?? [] }
 	}
 
 	/**

@@ -17,7 +17,7 @@ import { getDaysDiff } from '@baota/utils/date'
 import { executeWorkflow } from '@/api/workflow'
 import { useStore } from './useStore'
 
-import type { CertItem, CertListParams } from '@/types/cert'
+import type { CertItem, CertListParams, UpdateCertResult } from '@/types/cert'
 
 const { handleError } = useError()
 const { useFormTextarea } = useFormHooks()
@@ -520,28 +520,62 @@ export const useEditCertController = (cert: CertItem) => {
 		},
 	})
 
+	// 证书更新成功后，提示关联工作流是否立即触发执行
+	const showWorkflowDialog = (workflows: Array<{ id: string; name: string }>) => {
+		if (!workflows || workflows.length === 0) return
+		const names = workflows.map((w) => w.name).join('、')
+		useDialog({
+			title: '证书已更新',
+			content: `检测到以下工作流使用了此证书：${names}，是否立即触发执行？`,
+			confirmText: '立即执行',
+			cancelText: '稍后',
+			onPositiveClick: async () => {
+				for (const w of workflows) {
+					try {
+						const { fetch: run } = executeWorkflow({ id: w.id })
+						await run()
+					} catch (_) {}
+				}
+			},
+		})
+	}
+
 	confirm(async (close) => {
 		try {
 			openLoad()
-			const associated = await fetch()
-			close()
-			if (associated && (associated as any[]).length > 0) {
-				const names = (associated as Array<{ id: string; name: string }>).map((w) => w.name).join('、')
+			// useForm 的 fetch 返回类型按表单值推导，但运行时返回 request 的结果，需断言
+			const result = (await fetch()) as unknown as UpdateCertResult | undefined
+			// 新证书未覆盖原证书域名：提示缺失域名，确认后带 force 重新提交
+			if (result?.needsConfirmation) {
+				closeLoad()
+				const list = result.uncoveredDomains.join('、')
 				useDialog({
-					title: '证书已更新',
-					content: `检测到以下工作流使用了此证书：${names}，是否立即触发执行？`,
-					confirmText: '立即执行',
-					cancelText: '稍后',
+					title: '证书域名覆盖警告',
+					content: `新证书未覆盖原证书的以下域名：${list}。继续更新可能导致相关服务的证书失效，是否仍要更新？`,
+					confirmText: '仍要更新',
+					cancelText: '取消',
 					onPositiveClick: async () => {
-						for (const w of associated as Array<{ id: string; name: string }>) {
-							try {
-								const { fetch: run } = executeWorkflow({ id: w.id })
-								await run()
-							} catch (_) {}
+						try {
+							openLoad()
+							const forced = await updateExistingCert({
+								id: cert.id.toString(),
+								cert: editForm.value.cert,
+								key: editForm.value.key,
+								force: true,
+							})
+							close()
+							if (!forced.needsConfirmation) showWorkflowDialog(forced.associatedWorkflows)
+						} catch (_) {
+							// API error already displayed by handleApiError in useAxios; modal stays open
+						} finally {
+							closeLoad()
 						}
 					},
 				})
+				return
 			}
+			close()
+			if (result && !result.needsConfirmation) showWorkflowDialog(result.associatedWorkflows)
 		} catch (_) {
 			// API error already displayed by handleApiError in useAxios; modal stays open
 		} finally {

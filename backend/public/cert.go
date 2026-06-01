@@ -144,6 +144,73 @@ func ValidateCertificateChain(certStr string) error {
 	return nil
 }
 
+// ExtractCertDomains 提取证书覆盖的标识集合（去重）：
+// Subject.CommonName（非空）+ DNSNames + IPAddresses（以 ip.String() 表示）。
+func ExtractCertDomains(certObj *x509.Certificate) []string {
+	domainSet := make(map[string]bool)
+	if certObj.Subject.CommonName != "" {
+		domainSet[certObj.Subject.CommonName] = true
+	}
+	for _, dns := range certObj.DNSNames {
+		domainSet[dns] = true
+	}
+	for _, ip := range certObj.IPAddresses {
+		domainSet[ip.String()] = true
+	}
+	var domains []string
+	for d := range domainSet {
+		domains = append(domains, d)
+	}
+	return domains
+}
+
+// domainCovers 判断 newDom 是否覆盖 oldDom（通配符感知，大小写不敏感）。
+// 规则：精确相等；或 newDom 为 *.X 且 oldDom 为 X 的单层子域 label.X（label 非空且不含 .）；
+// 或 oldDom 同为 *.X（通过精确相等命中）。通配符不覆盖裸 apex，也不覆盖多层子域。
+func domainCovers(newDom, oldDom string) bool {
+	newDom = strings.ToLower(strings.TrimSpace(newDom))
+	oldDom = strings.ToLower(strings.TrimSpace(oldDom))
+	if newDom == oldDom {
+		return true
+	}
+	if strings.HasPrefix(newDom, "*.") {
+		base := newDom[2:]
+		if base == "" {
+			return false
+		}
+		suffix := "." + base
+		if strings.HasSuffix(oldDom, suffix) {
+			label := oldDom[:len(oldDom)-len(suffix)]
+			if label != "" && !strings.Contains(label, ".") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// UncoveredDomains 返回 oldDomains 中未被任一 newDomains 项覆盖的域名列表（全覆盖返回 nil）。
+// 空（去空白后为空）的旧域名会被跳过。
+func UncoveredDomains(newDomains, oldDomains []string) []string {
+	var uncovered []string
+	for _, old := range oldDomains {
+		if strings.TrimSpace(old) == "" {
+			continue
+		}
+		covered := false
+		for _, n := range newDomains {
+			if domainCovers(n, old) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			uncovered = append(uncovered, strings.TrimSpace(old))
+		}
+	}
+	return uncovered
+}
+
 // **主验证函数**
 func ValidateSSLCertificate(certStr, keyStr string) error {
 	certPEM, keyPEM := []byte(certStr), []byte(keyStr)
