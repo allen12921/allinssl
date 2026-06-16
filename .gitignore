@@ -1,5 +1,6 @@
 allinssl
 allinssl_linux_amd64
+plugins/upyun/upyun
 .DS_Store
 /data/
 /logs/

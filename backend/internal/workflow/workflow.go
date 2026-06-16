@@ -230,6 +230,9 @@ func RunNode(node *WorkflowNode, ctx *ExecutionContext) error {
 	var status ExecutionStatus
 	if err != nil {
 		status = StatusFailed
+		ctx.mu.Lock()
+		ctx.HasFailure = true
+		ctx.mu.Unlock()
 		if node.ChildNode == nil || node.ChildNode.Type != "execute_result_branch" {
 			return err
 		}
@@ -328,10 +331,16 @@ func RunWorkflow(content string, ctx *ExecutionContext) error {
 	} else {
 		ctx.Logger.Info("=============开始执行=============")
 		err = RunNode(&node, ctx)
-		// fmt.Println(err)
 		if err != nil {
 			ctx.Logger.Info("=============执行失败=============")
 			return err
+		}
+		ctx.mu.RLock()
+		hasFailure := ctx.HasFailure
+		ctx.mu.RUnlock()
+		if hasFailure {
+			ctx.Logger.Info("=============执行失败=============")
+			return fmt.Errorf("工作流中存在失败的节点")
 		}
 		ctx.Logger.Info("=============执行完成=============")
 		return nil

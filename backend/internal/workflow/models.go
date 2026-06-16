@@ -33,11 +33,12 @@ type WorkflowNode struct {
 }
 
 type ExecutionContext struct {
-	Data   map[string]any
-	Status map[string]ExecutionStatus
-	mu     sync.RWMutex
-	RunID  string
-	Logger *public.Logger
+	Data       map[string]any
+	Status     map[string]ExecutionStatus
+	mu         sync.RWMutex
+	RunID      string
+	Logger     *public.Logger
+	HasFailure bool
 }
 
 type ExecTime struct {
