@@ -1,5 +1,20 @@
 # ALLinSSL - Complete SSL Certificate Management Tool
 
+## About This Fork
+
+This repository is forked from [allinssl/allinssl](https://github.com/allinssl/allinssl). The following features have been added on top of upstream:
+
+| Feature | Description |
+|---------|-------------|
+| **API Key Access** | Call certificate APIs directly via MD5-based signature (`MD5(timestamp + MD5(api_key))`) without a session — ideal for script automation |
+| **AWS CloudFront Deployment** | New AWS CloudFront host provider: deploy certificates to CloudFront distributions via IAM |
+| **UpYun SSL Deployment** | New UpYun (又拍云) SSL certificate deployment plugin |
+| **Multi-domain Batch Deployment** | Alibaba Cloud CDN/DCDN and Qiniu Cloud CDN/OSS now accept multiple comma-separated domains for one-shot deployment |
+| **ARI Protocol Support** | Compatible with ACME Renewal Information (ARI) protocol — respects the CA-recommended renewal window |
+| **Manual Certificate Editing** | Manually-uploaded certificates can be edited and updated; updates can trigger associated workflows |
+| **Workflow Association Status** | Certificate list shows which workflows reference each cert; deletion warns about affected workflows |
+| **Certificate Chain Validation** | Certificate chain completeness and domain coverage are validated on upload and edit |
+
 ## Project Introduction
 
 ALLinSSL is a comprehensive SSL certificate lifecycle management tool that integrates certificate application, management, deployment, and monitoring. This tool helps users easily manage SSL certificates for multiple websites, providing automated certificate application, renewal, and deployment processes, while monitoring certificate status in real-time to ensure website security.

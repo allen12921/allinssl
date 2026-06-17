@@ -13,6 +13,21 @@
   <img src=".github/img/main.gif" alt="控制台预览" width="600">
 </p>
 
+## 🔀 关于本 Fork
+
+本仓库 fork 自 [allinssl/allinssl](https://github.com/allinssl/allinssl)，在上游基础上新增了以下功能：
+
+| 功能 | 说明 |
+|------|------|
+| **API Key 访问** | 支持通过 HMAC 签名方式无需 Session 直接调用证书接口，适合脚本自动化 |
+| **AWS CloudFront 部署** | 新增 AWS CloudFront 主机提供商，通过 IAM 证书完成 CloudFront 分发部署 |
+| **又拍云 SSL 部署** | 新增又拍云 SSL 证书部署插件 |
+| **多域名批量部署** | 阿里云 CDN/DCDN、七牛云 CDN/OSS 支持一次填写多个域名批量部署 |
+| **ARI 协议兼容** | 兼容 ACME Renewal Information (ARI) 协议，支持 CA 推荐的最佳续期时间窗口 |
+| **手动证书编辑** | 手动上传的证书支持编辑更新，更新后可自动触发关联工作流 |
+| **工作流关联状态** | 证书管理页面直接展示工作流关联状态，删除证书时给出影响提示 |
+| **证书链完整性校验** | 证书上传/编辑时自动校验证书链完整性及域名覆盖一致性 |
+
 ## 📌 项目亮点
 - ✅ 全自动证书申请/续期
 - 🌐 多平台部署（CDN/WAF/面板/云存储）
