@@ -118,6 +118,12 @@ export const getAllEabList = (
 	useApi<EabGetAllListResponse, EabGetAllListParams>('/v1/access/get_all_eab', params)
 
 /**
+ * @description 获取 ACME 账号的 account URI（用于 dns-persist-01 TXT 记录配置）
+ */
+export const getAccountURI = (params: { email: string; ca: string }): useAxiosReturn<AxiosResponseData, typeof params> =>
+	useApi<AxiosResponseData, typeof params>('/v1/acme_account/get_account_uri', params)
+
+/**
  * @description 测试授权API
  * @param {TestAccessParams} [params] 请求参数
  * @returns {useAxiosReturn<AxiosResponseData, TestAccessParams>} 测试授权的组合式 API 调用封装。包含响应数据、加载状态及执行函数。

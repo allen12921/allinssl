@@ -78,6 +78,7 @@ func Register(r *gin.Engine) {
 		acmeAccount.POST("/add_account", api.AddAccount)
 		acmeAccount.POST("/del_account", api.DelAccount)
 		acmeAccount.POST("/upd_account", api.UpdateAccount)
+		acmeAccount.POST("/get_account_uri", api.GetAccountURI)
 	}
 	cert := v1.Group("/cert")
 	{

@@ -1,8 +1,10 @@
-import { Ref } from 'vue'
+import { Ref, computed, watch, onUnmounted } from 'vue'
 import { defineComponent, PropType } from 'vue'
-import { useBaseNodeValidator } from '@workflowView/lib/BaseNodeValidator'
+import { useNodeValidator } from '@components/FlowChart/lib/verify'
+import { useStore } from '@components/FlowChart/useStore'
+import { useThemeCssVar } from '@baota/naive-ui/theme'
 import { $t } from '@locales/index'
-import rules from './verify'
+import baseRules from './verify'
 import Drawer from './model'
 import { useNodeHandler } from '@workflowView/lib/NodeHandler'
 import type { ApplyNodeConfig } from '@components/FlowChart/types'
@@ -23,6 +25,43 @@ export default defineComponent({
 		},
 	},
 	setup(props: NodeProps, { expose }) {
+		const { isRefreshNode } = useStore()
+		const { registerCompatValidator, validate, validationResult, unregisterValidator } = useNodeValidator()
+		const cssVar = useThemeCssVar(['warningColor', 'primaryColor'])
+
+		const validColor = computed(() =>
+			validationResult.value.valid ? 'var(--n-primary-color)' : 'var(--n-warning-color)',
+		)
+
+		// provider_id 在 dns-persist-01 时不必填，其余模式必填
+		const buildRules = () => {
+			const isDNSPersist = props.node.config.challenge_type === 'dns-persist-01'
+			return {
+				...baseRules,
+				provider_id: isDNSPersist
+					? { required: false, trigger: 'change' }
+					: { required: true, message: $t('t_3_1745490735059'), trigger: 'change' },
+			}
+		}
+
+		const revalidate = () => {
+			registerCompatValidator(props.node.id, buildRules(), props.node.config)
+			validate(props.node.id)
+		}
+
+		watch(
+			() => isRefreshNode.value,
+			() => {
+				useTimeoutFn(revalidate, 500)
+			},
+			{ immediate: true },
+		)
+
+		// challenge_type 变更时立即重新验证
+		watch(() => props.node.config.challenge_type, revalidate)
+
+		onUnmounted(() => unregisterValidator(props.node.id))
+
 		/**
 		 * @description 渲染节点内容
 		 * @param {boolean} valid 是否有效
@@ -34,7 +73,11 @@ export default defineComponent({
 			return $t('t_9_1745735765287')
 		}
 
-		const { renderNode } = useBaseNodeValidator(props, rules, renderContent)
+		const renderNode = () => (
+			<div style={cssVar.value} class="text-[12px]">
+				<div style={{ color: validColor.value }}>{renderContent(validationResult.value.valid, props.node.config)}</div>
+			</div>
+		)
 
 		// 使用通用节点处理器
 		const { handleNodeClick } = useNodeHandler<ApplyNodeConfig>()
@@ -45,7 +88,6 @@ export default defineComponent({
 				handleNodeClick(selectedNode, (node) => <Drawer node={node} />),
 		})
 
-		// 返回渲染函数
 		return renderNode
 	},
 })

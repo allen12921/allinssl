@@ -7,6 +7,29 @@ import (
 	"strings"
 )
 
+// GetAccountURI 返回已注册 ACME 账号的 account URI（用于 dns-persist-01 TXT 记录配置）。
+func GetAccountURI(c *gin.Context) {
+	var form struct {
+		Email string `form:"email"`
+		CA    string `form:"ca"`
+	}
+	if err := c.Bind(&form); err != nil {
+		public.FailMsg(c, err.Error())
+		return
+	}
+	form.Email = strings.TrimSpace(form.Email)
+	if form.Email == "" || form.CA == "" {
+		public.FailMsg(c, "email 和 ca 不能为空")
+		return
+	}
+	uri := apply.GetAccountURIByEmail(form.Email, form.CA)
+	if uri == "" {
+		public.FailMsg(c, "未找到已注册的账号，请先在账号管理中注册或申请一次证书")
+		return
+	}
+	public.SuccessData(c, map[string]string{"accounturi": uri}, 1)
+}
+
 func AddAccount(c *gin.Context) {
 	var form struct {
 		Email       string `form:"email"`

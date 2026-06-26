@@ -9,7 +9,8 @@ const validator = createNodeValidator($t('t_10_1747817611126'))
 export default {
 	domains: validator.domainGroup(),
 	email: validator.email(),
-	provider_id: validator.required('provider_id', $t('t_3_1745490735059')),
+	// provider_id 在 dns-persist-01 模式下不必填；dns-01 时由 model.tsx confirm handler 强制检查
+	provider_id: { required: false, trigger: 'change' },
 	end_day: validator.custom((rule, value) => {
 		// 检查值是否为数字类型且大于0
 		if (typeof value !== 'number' || isNaN(value) || value < 1) {

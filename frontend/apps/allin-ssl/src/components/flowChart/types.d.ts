@@ -237,6 +237,8 @@ export interface ApplyNodeConfig {
   max_wait?: number; // 预检查超时时间，单位秒（可选）
   ignore_check: number; // 忽略预检查结果，1继续，0停止，默认0
   ari_enabled?: number; // 启用ARI续签建议，1启用，0关闭；旧工作流缺省关闭
+  challenge_type?: string; // 验证方式：'dns'（默认）或 'dns-persist-01'
+  issuer_domain_name?: string; // dns-persist-01 专用：CA 颁发者域名（可选，lego 可自动检测）
   // 高级功能
   // algorithm: 'RSA2048' | 'RSA3072' | 'RSA4096' | 'RSA8192' | 'EC256' | 'EC384' // 数字证书算法
   // dnsServer?: string // 指定DNS解析服务器

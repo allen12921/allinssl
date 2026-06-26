@@ -131,6 +131,37 @@ func GetAcmeUser(email string, logger *public.Logger, accData map[string]any) (u
 	return
 }
 
+// GetAccountURIByEmail 从 DB 中取出已注册账号的 Location（ACME account URL）。
+// 用于 dns-persist-01 向用户展示需要写入 DNS 的 accounturi 值。
+func GetAccountURIByEmail(email, ca string) string {
+	db, err := GetSqlite()
+	if err != nil {
+		return ""
+	}
+	defer db.Close()
+	accData, err := GetAccount(db, email, ca)
+	if err != nil || accData == nil {
+		return ""
+	}
+	reg, ok := accData["reg"].(string)
+	if !ok || reg == "" {
+		return ""
+	}
+	// v4 格式：{"body":{...},"uri":"..."}
+	var v4Reg struct {
+		URI string `json:"uri,omitempty"`
+	}
+	if err = json.Unmarshal([]byte(reg), &v4Reg); err == nil && v4Reg.URI != "" {
+		return v4Reg.URI
+	}
+	// v5 格式：{"status":"valid","accountURL":"..."}
+	var ext acme.ExtendedAccount
+	if err = json.Unmarshal([]byte(reg), &ext); err == nil {
+		return ext.Location
+	}
+	return ""
+}
+
 func GetAccount(db *public.Sqlite, email, ca string) (map[string]interface{}, error) {
 	var data []map[string]interface{}
 	var err error

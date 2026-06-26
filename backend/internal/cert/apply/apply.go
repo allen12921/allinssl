@@ -29,6 +29,7 @@ import (
 	"github.com/go-acme/lego/v5/certificate"
 	"github.com/go-acme/lego/v5/challenge"
 	"github.com/go-acme/lego/v5/challenge/dns01"
+	"github.com/go-acme/lego/v5/challenge/dnspersist01"
 	"github.com/go-acme/lego/v5/lego"
 	legolog "github.com/go-acme/lego/v5/log"
 	"github.com/go-acme/lego/v5/providers/dns/alidns"
@@ -695,8 +696,13 @@ func Apply(cfg map[string]any, logger *public.Logger) (map[string]any, error) {
 	if !ok {
 		return nil, fmt.Errorf("参数错误：domains")
 	}
-	providerStr, ok := cfg["provider"].(string)
-	if !ok {
+	// provider/provider_id 仅 dns-01 使用，dns-persist-01 跳过
+	challengeType, _ := cfg["challenge_type"].(string)
+	if challengeType == "" {
+		challengeType = "dns"
+	}
+	providerStr, _ := cfg["provider"].(string)
+	if challengeType != "dns-persist-01" && providerStr == "" {
 		return nil, fmt.Errorf("参数错误：provider")
 	}
 	endDay := 30
@@ -751,13 +757,15 @@ func Apply(cfg map[string]any, logger *public.Logger) (map[string]any, error) {
 	}
 
 	var providerID string
-	switch v := cfg["provider_id"].(type) {
-	case float64:
-		providerID = strconv.Itoa(int(v))
-	case string:
-		providerID = v
-	default:
-		return nil, fmt.Errorf("参数错误：provider_id")
+	if challengeType != "dns-persist-01" {
+		switch v := cfg["provider_id"].(type) {
+		case float64:
+			providerID = strconv.Itoa(int(v))
+		case string:
+			providerID = v
+		default:
+			return nil, fmt.Errorf("参数错误：provider_id")
+		}
 	}
 	var NameServers []string
 	if cfg["name_server"] == nil {
@@ -939,72 +947,125 @@ func Apply(cfg map[string]any, logger *public.Logger) (map[string]any, error) {
 		}
 		logger.Debug("ARI indicates renewal should continue")
 	}
-	providerData, err := access.GetAccess(providerID)
-	if err != nil {
-		return nil, err
-	}
-	providerConfigStr, ok := providerData["config"].(string)
-	if !ok {
-		return nil, fmt.Errorf("api配置错误")
-	}
-	// 解析 JSON 配置
-	var providerConfig map[string]string
-	err = json.Unmarshal([]byte(providerConfigStr), &providerConfig)
-	if err != nil {
-		return nil, err
-	}
+	if challengeType == "dns-persist-01" {
+		// dns-persist-01：用户预先在 DNS 中创建持久 TXT 记录，无需 DNS provider。
+		//
+		// 强制 modeWait + 1s，防止记录缺失时内部 manual provider 阻塞 os.Stdin。
+		// Persist 会立即返回（睡 1s），随后传播预检查失败并返回清晰的错误信息。
+		os.Setenv("DNSPERSIST_MANUAL_MODE", "wait")
+		os.Setenv("DNSPERSIST_MANUAL_WAIT", "1")
+		// 让内部 provider 的传播超时与用户配置的 max_wait 一致
+		os.Setenv("DNSPERSIST_MANUAL_PROPAGATION_TIMEOUT", strconv.Itoa(int(maxWait.Seconds())))
 
-	// DNS 验证
-	provider, err := GetDNSProvider(providerStr, providerConfig, httpClient, maxWait)
-	if err != nil {
-		return nil, fmt.Errorf("创建 DNS provider 失败: %v", err)
-	}
-
-	if !skipCheck {
-		dns01.SetDefaultClient(dns01.NewClient(&dns01.Options{
-			RecursiveNameservers: NameServers,
-		}))
-	}
-	if skipCheck {
-		// 跳过预检查
-		err = client.Challenge.SetDNS01Provider(provider,
-			dns01.WrapPreCheck(func(ctx context.Context, domain, fqdn, value string, check dns01.PreCheckFunc) (bool, error) {
-				return true, nil
-			}),
-		)
-	} else {
-		start := time.Now()
-		if ignoreCheck {
-			err = client.Challenge.SetDNS01Provider(provider,
-				dns01.WrapPreCheck(func(ctx context.Context, domain, fqdn, value string, check dns01.PreCheckFunc) (bool, error) {
-					ok, err := check(ctx, fqdn, value)
-					elapsed := time.Since(start)
-					if err != nil {
-						logger.Debug(fmt.Sprintf("[WARN] DNS precheck error for %s: %v", fqdn, err))
+		var dpOpts []dnspersist01.ChallengeOption
+		if issuerDomain, ok2 := cfg["issuer_domain_name"].(string); ok2 && issuerDomain != "" {
+			dpOpts = append(dpOpts, dnspersist01.WithIssuerDomainName(issuerDomain))
+		}
+		if skipCheck {
+			// 跳过传播检查：直接通过（记录必须已存在）
+			dpOpts = append(dpOpts,
+				dnspersist01.DisableAuthoritativeNssPropagationRequirement(),
+				dnspersist01.DisableRecursiveNSsPropagationRequirement(),
+			)
+		} else {
+			dnspersist01.SetDefaultClient(dnspersist01.NewClient(&dnspersist01.Options{
+				RecursiveNameservers: NameServers,
+			}))
+			if ignoreCheck {
+				// 与 dns-01 的 ignore_check 逻辑一致：超过 maxWait 后强制通过
+				dpStart := time.Now()
+				dpOpts = append(dpOpts, dnspersist01.WrapPreCheck(
+					func(ctx context.Context, domain, fqdn string, matcher dnspersist01.RecordMatcher, check dnspersist01.PreCheckFunc) (bool, error) {
+						ok, err := check(ctx, fqdn, matcher)
+						elapsed := time.Since(dpStart)
+						if err != nil {
+							if elapsed >= maxWait {
+								logger.Debug(fmt.Sprintf("[WARN] dns-persist-01 precheck error, forcing continue after %v: %v", elapsed, err))
+								return true, nil
+							}
+							return false, nil
+						}
+						if ok {
+							return true, nil
+						}
 						if elapsed >= maxWait {
-							logger.Debug(fmt.Sprintf("[WARN] Precheck error but forcing continue due to timeout for %s", fqdn))
+							logger.Debug(fmt.Sprintf("[WARN] dns-persist-01 TXT record not found after %v, forcing continue.", elapsed))
 							return true, nil
 						}
 						return false, nil
-					}
-					if ok {
-						logger.Debug(fmt.Sprintf("[OK] TXT record for %s is present.", fqdn))
-						return true, nil
-					}
-					if elapsed >= maxWait {
-						logger.Debug(fmt.Sprintf("[WARN] TXT record for %s not found after %v, forcing continue.", fqdn, elapsed))
-						return true, nil
-					}
-					logger.Debug(fmt.Sprintf("[INFO] TXT record for %s not yet found, waiting... elapsed %v", fqdn, elapsed))
-					return false, nil
+					},
+				))
+			}
+		}
+		err = client.Challenge.SetDNSPersist01(dpOpts...)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// 标准 dns-01 流程
+		providerData, err := access.GetAccess(providerID)
+		if err != nil {
+			return nil, err
+		}
+		providerConfigStr, ok := providerData["config"].(string)
+		if !ok {
+			return nil, fmt.Errorf("api配置错误")
+		}
+		var providerConfig map[string]string
+		if err = json.Unmarshal([]byte(providerConfigStr), &providerConfig); err != nil {
+			return nil, err
+		}
+
+		provider, err := GetDNSProvider(providerStr, providerConfig, httpClient, maxWait)
+		if err != nil {
+			return nil, fmt.Errorf("创建 DNS provider 失败: %v", err)
+		}
+
+		if !skipCheck {
+			dns01.SetDefaultClient(dns01.NewClient(&dns01.Options{
+				RecursiveNameservers: NameServers,
+			}))
+		}
+		if skipCheck {
+			err = client.Challenge.SetDNS01Provider(provider,
+				dns01.WrapPreCheck(func(ctx context.Context, domain, fqdn, value string, check dns01.PreCheckFunc) (bool, error) {
+					return true, nil
 				}),
 			)
 		} else {
-			err = client.Challenge.SetDNS01Provider(provider)
+			start := time.Now()
+			if ignoreCheck {
+				err = client.Challenge.SetDNS01Provider(provider,
+					dns01.WrapPreCheck(func(ctx context.Context, domain, fqdn, value string, check dns01.PreCheckFunc) (bool, error) {
+						ok, err := check(ctx, fqdn, value)
+						elapsed := time.Since(start)
+						if err != nil {
+							logger.Debug(fmt.Sprintf("[WARN] DNS precheck error for %s: %v", fqdn, err))
+							if elapsed >= maxWait {
+								logger.Debug(fmt.Sprintf("[WARN] Precheck error but forcing continue due to timeout for %s", fqdn))
+								return true, nil
+							}
+							return false, nil
+						}
+						if ok {
+							logger.Debug(fmt.Sprintf("[OK] TXT record for %s is present.", fqdn))
+							return true, nil
+						}
+						if elapsed >= maxWait {
+							logger.Debug(fmt.Sprintf("[WARN] TXT record for %s not found after %v, forcing continue.", fqdn, elapsed))
+							return true, nil
+						}
+						logger.Debug(fmt.Sprintf("[INFO] TXT record for %s not yet found, waiting... elapsed %v", fqdn, elapsed))
+						return false, nil
+					}),
+				)
+			} else {
+				err = client.Challenge.SetDNS01Provider(provider)
+			}
 		}
-	}
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// fmt.Println(strings.Split(domains, ","))

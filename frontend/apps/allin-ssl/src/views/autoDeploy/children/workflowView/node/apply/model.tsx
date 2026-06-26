@@ -11,6 +11,8 @@ import {
 	NFormItemGi,
 	NSpin,
 	NDropdown,
+	NAlert,
+	NTag,
 } from 'naive-ui'
 import { useForm, useFormHooks, useModalHooks } from '@baota/naive-ui/hooks'
 import { useStore } from '@components/FlowChart/useStore'
@@ -21,7 +23,7 @@ import DnsProviderSelect from '@components/DnsProviderSelect'
 import type { ApplyNodeConfig } from '@components/FlowChart/types'
 import { deepClone } from '@baota/utils/data'
 import { noSideSpace } from '@lib/utils'
-import { getEabList } from '@api/access'
+import { getEabList, getAccountURI } from '@api/access'
 import SvgIcon from '@components/SvgIcon'
 import { CACertificateAuthorization } from '@config/data'
 
@@ -50,6 +52,8 @@ export default defineComponent({
 					ignore_check: 0,
 					// 新建工作流默认启用 ARI；旧工作流缺省时后端保持原续签逻辑。
 					ari_enabled: 1,
+					challenge_type: 'dns',
+					issuer_domain_name: '',
 				},
 			}),
 		},
@@ -74,6 +78,25 @@ export default defineComponent({
     // 获取路由参数
     const isEdit = computed(() => route.query.isEdit === "true");
     const routeEmail = computed(() => (route.query.email as string) || "");
+
+    // dns-persist-01
+    const isDNSPersist = computed(() => param.value.challenge_type === 'dns-persist-01')
+    const accounturi = ref('')
+    const loadingAccounturi = ref(false)
+
+    const fetchAccountURI = async () => {
+      if (!param.value.email || !param.value.ca) return
+      loadingAccounturi.value = true
+      accounturi.value = ''
+      try {
+        const { data } = await getAccountURI({ email: param.value.email, ca: param.value.ca }).fetch()
+        accounturi.value = (data as any)?.accounturi || ''
+      } catch {
+        accounturi.value = ''
+      } finally {
+        loadingAccounturi.value = false
+      }
+    }
 
     // CA选项状态
     const caOptions = ref<
@@ -310,24 +333,68 @@ export default defineComponent({
         }),
         {
           type: "custom" as const,
-          render: () => {
-            return (
-              <DnsProviderSelect
-                type="dns"
-                path="provider_id"
-                value={param.value.provider_id}
-                valueType="value"
-                isAddMode={true}
-                {...{
-                  "onUpdate:value": (val: { value: string; type: string }) => {
-                    param.value.provider_id = val.value;
-                    param.value.provider = val.type;
-                  },
-                }}
+          render: () => (
+            <NFormItem label="验证方式" path="challenge_type">
+              <NSelect
+                value={param.value.challenge_type ?? 'dns'}
+                options={[
+                  { label: 'DNS-01（自动）', value: 'dns' },
+                  { label: 'DNS-PERSIST-01（持久 TXT 记录）', value: 'dns-persist-01' },
+                ]}
+                onUpdateValue={(v: string) => { param.value.challenge_type = v }}
               />
-            );
-          },
+            </NFormItem>
+          ),
         },
+        // DNS provider：仅 dns-01 时显示
+        ...(!isDNSPersist.value ? [{
+          type: "custom" as const,
+          render: () => (
+            <DnsProviderSelect
+              type="dns"
+              path="provider_id"
+              value={param.value.provider_id}
+              valueType="value"
+              isAddMode={true}
+              {...{
+                "onUpdate:value": (val: { value: string; type: string }) => {
+                  param.value.provider_id = val.value;
+                  param.value.provider = val.type;
+                },
+              }}
+            />
+          ),
+        }] : []),
+        // dns-persist-01 配置区
+        ...(isDNSPersist.value ? [{
+          type: "custom" as const,
+          render: () => (
+            <div>
+              <NFormItem label="CA 颁发者域名（可选）" path="issuer_domain_name">
+                <NInput
+                  v-model:value={(param.value as any).issuer_domain_name}
+                  placeholder="如 acme-v02.api.letsencrypt.org（留空自动检测）"
+                  allowInput={noSideSpace}
+                />
+              </NFormItem>
+              <NAlert type="info" title="DNS-PERSIST-01 使用说明" style="margin-bottom:12px">
+                <p>请在您的域名 DNS 中预先添加一条 TXT 记录：</p>
+                <p><NTag>记录名</NTag>：<code>_validation-persist.您的域名</code></p>
+                <p><NTag>普通域名记录值</NTag>：<code>[CA颁发者域名]; accounturi=[您的账号URI]</code></p>
+                <p><NTag>通配符域名记录值</NTag>：<code>[CA颁发者域名]; accounturi=[您的账号URI]; policy=wildcard</code></p>
+                <p style="margin-top:8px">
+                  {accounturi.value ? (
+                    <span>您的账号 URI：<code>{accounturi.value}</code></span>
+                  ) : (
+                    <NButton size="small" loading={loadingAccounturi.value} onClick={fetchAccountURI}>
+                      获取账号 URI
+                    </NButton>
+                  )}
+                </p>
+              </NAlert>
+            </div>
+          ),
+        }] : []),
         {
           type: "custom" as const,
           render: () => {
@@ -615,10 +682,11 @@ export default defineComponent({
       example,
     } = useForm<ApplyNodeConfig>({ defaultValue: param, config, rules });
 
-    // 监听CA值变化，自动加载邮箱选项
+    // 监听CA值变化，自动加载邮箱选项，并清除过期的账号 URI
     watch(
       () => param.value.ca,
       async (newCA) => {
+        accounturi.value = ''
         if (newCA) {
           await loadEmailOptions(newCA);
         } else {
@@ -629,6 +697,9 @@ export default defineComponent({
         }
       }
     );
+
+    // 切换邮箱后清除过期账号 URI
+    watch(() => param.value.email, () => { accounturi.value = '' });
 
     // 监听邮箱选项变化，如果当前下拉显示且没有选项了就关闭下拉
     watch(
@@ -666,6 +737,11 @@ export default defineComponent({
     // 确认事件触发
 		confirm(async (close) => {
       try {
+				// dns-01 模式需要 DNS 提供商，在表单校验前主动检查以确保错误可见
+				if (!isDNSPersist.value && !param.value.provider_id) {
+					window.$message?.error($t('t_3_1745490735059'))
+					return
+				}
 				await example.value?.validate();
 				data.value.eabId = "";
 				data.value.email = param.value.email;
