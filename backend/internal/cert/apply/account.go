@@ -10,25 +10,25 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"github.com/go-acme/lego/v4/registration"
+	"github.com/go-acme/lego/v5/acme"
 	"time"
 )
 
 type MyUser struct {
 	Email        string
-	Registration *registration.Resource
-	key          crypto.PrivateKey
+	Registration *acme.ExtendedAccount
+	key          crypto.Signer
 }
 
 func (u *MyUser) GetEmail() string {
 	return u.Email
 }
 
-func (u *MyUser) GetRegistration() *registration.Resource {
+func (u *MyUser) GetRegistration() *acme.ExtendedAccount {
 	return u.Registration
 }
 
-func (u *MyUser) GetPrivateKey() crypto.PrivateKey {
+func (u *MyUser) GetPrivateKey() crypto.Signer {
 	return u.key
 }
 
@@ -100,14 +100,28 @@ func GetAcmeUser(email string, logger *public.Logger, accData map[string]any) (u
 		return
 	}
 
-	var Registration registration.Resource
-	localKey, err1 := public.ParsePrivateKey([]byte(key))
+	var Registration acme.ExtendedAccount
+	rawKey, err1 := public.ParsePrivateKey([]byte(key))
 	if err1 != nil {
 		logger.Debug("acme账号私钥解析失败", err1)
 		return
 	}
-	err2 := json.Unmarshal([]byte(reg), &Registration)
-	if err2 != nil {
+	localKey, ok := rawKey.(crypto.Signer)
+	if !ok {
+		logger.Debug("acme账号私钥不支持 crypto.Signer 接口")
+		return
+	}
+	// 兼容旧版 v4 registration.Resource JSON 格式：{"body":{...},"uri":"..."}
+	var v4Reg struct {
+		Body json.RawMessage `json:"body,omitempty"`
+		URI  string          `json:"uri,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(reg), &v4Reg); err == nil && v4Reg.URI != "" {
+		var acc acme.Account
+		_ = json.Unmarshal(v4Reg.Body, &acc)
+		Registration.Account = acc
+		Registration.Location = v4Reg.URI
+	} else if err2 := json.Unmarshal([]byte(reg), &Registration); err2 != nil {
 		return
 	}
 	logger.Debug("acme账号私钥和注册信息解析成功")

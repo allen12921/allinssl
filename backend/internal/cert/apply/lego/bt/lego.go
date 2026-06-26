@@ -1,10 +1,11 @@
 package bt
 
 import (
+	"context"
 	"fmt"
-	"github.com/go-acme/lego/v4/challenge"
-	"github.com/go-acme/lego/v4/challenge/dns01"
-	"github.com/go-acme/lego/v4/platform/config/env"
+	"github.com/go-acme/lego/v5/challenge"
+	"github.com/go-acme/lego/v5/challenge/dns01"
+	"github.com/go-acme/lego/v5/platform/env"
 	"time"
 )
 
@@ -90,12 +91,12 @@ func (d *DNSProvider) Timeout() (timeout, interval time.Duration) {
 	return d.config.PropagationTimeout, d.config.PollingInterval
 }
 
-func (d *DNSProvider) Present(domain, token, keyAuth string) error {
-	return d.config.addDNSRecord(domain, keyAuth)
+func (d *DNSProvider) Present(ctx context.Context, domain, token, keyAuth string) error {
+	return d.config.addDNSRecord(ctx, domain, keyAuth)
 }
 
-func (d *DNSProvider) CleanUp(domain, token, keyAuth string) error {
-	return d.config.removeDNSRecord(domain, keyAuth)
+func (d *DNSProvider) CleanUp(ctx context.Context, domain, token, keyAuth string) error {
+	return d.config.removeDNSRecord(ctx, domain, keyAuth)
 }
 
 func (c *Config) GetDomainId(domain string) (int, int) {
@@ -122,11 +123,11 @@ func (c *Config) GetDomainId(domain string) (int, int) {
 	return 0, 0
 }
 
-func (c *Config) addDNSRecord(domain, keyAuth string) error {
-	info := dns01.GetChallengeInfo(domain, keyAuth)
+func (c *Config) addDNSRecord(ctx context.Context, domain, keyAuth string) error {
+	info := dns01.GetChallengeInfo(ctx, domain, keyAuth)
 
 	EffectiveFQDN := dns01.UnFqdn(info.EffectiveFQDN)
-	rootDomain, err := dns01.FindZoneByFqdn(info.EffectiveFQDN)
+	rootDomain, err := dns01.DefaultClient().FindZoneByFqdn(ctx, info.EffectiveFQDN)
 	if err != nil {
 		return fmt.Errorf("无法获取域名的根域名: %w", err)
 	}
@@ -149,11 +150,11 @@ func (c *Config) addDNSRecord(domain, keyAuth string) error {
 	return err
 }
 
-func (c *Config) removeDNSRecord(domain, keyAuth string) error {
-	info := dns01.GetChallengeInfo(domain, keyAuth)
+func (c *Config) removeDNSRecord(ctx context.Context, domain, keyAuth string) error {
+	info := dns01.GetChallengeInfo(ctx, domain, keyAuth)
 
 	EffectiveFQDN := dns01.UnFqdn(info.EffectiveFQDN)
-	rootDomain, err := dns01.FindZoneByFqdn(info.EffectiveFQDN)
+	rootDomain, err := dns01.DefaultClient().FindZoneByFqdn(ctx, info.EffectiveFQDN)
 	if err != nil {
 		return fmt.Errorf("无法获取域名的根域名: %w", err)
 	}

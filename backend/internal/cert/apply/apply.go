@@ -8,11 +8,13 @@ import (
 	"ALLinSSL/backend/internal/cert/apply/lego/jdcloud"
 	"ALLinSSL/backend/internal/cert/apply/lego/webhook"
 	"ALLinSSL/backend/public"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,35 +23,36 @@ import (
 	"time"
 
 	azcorecloud "github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
-	"github.com/go-acme/lego/v4/acme/api"
-	"github.com/go-acme/lego/v4/certcrypto"
-	"github.com/go-acme/lego/v4/certificate"
-	"github.com/go-acme/lego/v4/challenge"
-	"github.com/go-acme/lego/v4/challenge/dns01"
-	"github.com/go-acme/lego/v4/lego"
-	"github.com/go-acme/lego/v4/log"
-	"github.com/go-acme/lego/v4/providers/dns/alidns"
-	"github.com/go-acme/lego/v4/providers/dns/azuredns"
-	"github.com/go-acme/lego/v4/providers/dns/baiducloud"
-	"github.com/go-acme/lego/v4/providers/dns/bunny"
-	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
-	"github.com/go-acme/lego/v4/providers/dns/cloudns"
-	"github.com/go-acme/lego/v4/providers/dns/constellix"
-	"github.com/go-acme/lego/v4/providers/dns/edgeone"
-	"github.com/go-acme/lego/v4/providers/dns/gcore"
-	"github.com/go-acme/lego/v4/providers/dns/godaddy"
-	"github.com/go-acme/lego/v4/providers/dns/huaweicloud"
-	"github.com/go-acme/lego/v4/providers/dns/namecheap"
-	"github.com/go-acme/lego/v4/providers/dns/namedotcom"
-	"github.com/go-acme/lego/v4/providers/dns/namesilo"
-	"github.com/go-acme/lego/v4/providers/dns/ns1"
-	"github.com/go-acme/lego/v4/providers/dns/rainyun"
-	"github.com/go-acme/lego/v4/providers/dns/route53"
-	"github.com/go-acme/lego/v4/providers/dns/spaceship"
-	"github.com/go-acme/lego/v4/providers/dns/tencentcloud"
-	"github.com/go-acme/lego/v4/providers/dns/volcengine"
-	"github.com/go-acme/lego/v4/providers/dns/westcn"
-	"github.com/go-acme/lego/v4/registration"
+	"github.com/go-acme/lego/v5/acme"
+	legoapi "github.com/go-acme/lego/v5/acme/api"
+	"github.com/go-acme/lego/v5/certcrypto"
+	"github.com/go-acme/lego/v5/certificate"
+	"github.com/go-acme/lego/v5/challenge"
+	"github.com/go-acme/lego/v5/challenge/dns01"
+	"github.com/go-acme/lego/v5/lego"
+	legolog "github.com/go-acme/lego/v5/log"
+	"github.com/go-acme/lego/v5/providers/dns/alidns"
+	"github.com/go-acme/lego/v5/providers/dns/azuredns"
+	"github.com/go-acme/lego/v5/providers/dns/baiducloud"
+	"github.com/go-acme/lego/v5/providers/dns/bunny"
+	"github.com/go-acme/lego/v5/providers/dns/cloudflare"
+	"github.com/go-acme/lego/v5/providers/dns/cloudns"
+	"github.com/go-acme/lego/v5/providers/dns/constellix"
+	"github.com/go-acme/lego/v5/providers/dns/edgeone"
+	"github.com/go-acme/lego/v5/providers/dns/gcore"
+	"github.com/go-acme/lego/v5/providers/dns/godaddy"
+	"github.com/go-acme/lego/v5/providers/dns/huaweicloud"
+	"github.com/go-acme/lego/v5/providers/dns/namecheap"
+	"github.com/go-acme/lego/v5/providers/dns/namedotcom"
+	"github.com/go-acme/lego/v5/providers/dns/namesilo"
+	"github.com/go-acme/lego/v5/providers/dns/ns1"
+	"github.com/go-acme/lego/v5/providers/dns/rainyun"
+	"github.com/go-acme/lego/v5/providers/dns/route53"
+	"github.com/go-acme/lego/v5/providers/dns/spaceship"
+	"github.com/go-acme/lego/v5/providers/dns/tencentcloud"
+	"github.com/go-acme/lego/v5/providers/dns/volcengine"
+	"github.com/go-acme/lego/v5/providers/dns/westcn"
+	"github.com/go-acme/lego/v5/registration"
 )
 
 var AlgorithmMap = map[string]certcrypto.KeyType{
@@ -426,7 +429,6 @@ func GetAcmeClient(email, algorithm, eabId, ca string, httpClient *http.Client, 
 	}
 	user := GetAcmeUser(email, logger, accData)
 	config := lego.NewConfig(user)
-	config.Certificate.KeyType = AlgorithmMap[algorithm]
 	config.CADirURL = CADirURL
 	config.Certificate.Timeout = time.Duration(60) * time.Second
 	if httpClient != nil {
@@ -458,23 +460,23 @@ func GetAcmeClient(email, algorithm, eabId, ca string, httpClient *http.Client, 
 			}
 		}
 		var (
-			reg              *registration.Resource
 			Kid, HmacEncoded string
 		)
 		if eabData != nil {
 			Kid = eabData["Kid"].(string)
 			HmacEncoded = eabData["HmacEncoded"].(string)
 		}
+		var reg *acme.ExtendedAccount
 		if Kid != "" && HmacEncoded != "" {
 			Kid := eabData["Kid"].(string)
 			HmacEncoded := eabData["HmacEncoded"].(string)
-			reg, err = client.Registration.RegisterWithExternalAccountBinding(registration.RegisterEABOptions{
+			reg, err = client.Registration.RegisterWithExternalAccountBinding(context.Background(), registration.RegisterEABOptions{
 				TermsOfServiceAgreed: true,
 				Kid:                  Kid,
 				HmacEncoded:          HmacEncoded,
 			})
 		} else {
-			reg, err = client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+			reg, err = client.Registration.Register(context.Background(), registration.RegisterOptions{TermsOfServiceAgreed: true})
 		}
 		if err != nil {
 			return nil, err
@@ -623,7 +625,7 @@ func getARILeafAndReplacesID(certPEM any) (*x509.Certificate, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	replacesCertID, err := certificate.MakeARICertID(leaf)
+	replacesCertID, err := legoapi.MakeARICertID(leaf)
 	if err != nil {
 		return leaf, "", err
 	}
@@ -656,9 +658,9 @@ func shouldSkipByARI(client *lego.Client, matchedCert *MatchedCert, endDay int, 
 		return false, replacesCertID
 	}
 
-	renewalInfo, err := client.Certificate.GetRenewalInfo(certificate.RenewalInfoRequest{Cert: leaf})
+	renewalInfo, err := client.Certificate.GetRenewalInfo(context.Background(), leaf)
 	if err != nil {
-		if errors.Is(err, api.ErrNoARI) {
+		if errors.Is(err, legoapi.ErrNoARI) {
 			logger.Debug("当前CA不支持ARI，回退本地续签判断：" + err.Error())
 		} else {
 			logger.Debug("ARI查询失败，回退本地续签判断：" + err.Error())
@@ -683,7 +685,7 @@ func shouldSkipByARI(client *lego.Client, matchedCert *MatchedCert, endDay int, 
 }
 
 func Apply(cfg map[string]any, logger *public.Logger) (map[string]any, error) {
-	log.Logger = logger.GetLogger()
+	legolog.SetDefault(slog.New(slog.NewTextHandler(logger.GetLogger().Writer(), nil)))
 	var err error
 	email, ok := cfg["email"].(string)
 	if !ok {
@@ -958,10 +960,15 @@ func Apply(cfg map[string]any, logger *public.Logger) (map[string]any, error) {
 		return nil, fmt.Errorf("创建 DNS provider 失败: %v", err)
 	}
 
+	if !skipCheck {
+		dns01.SetDefaultClient(dns01.NewClient(&dns01.Options{
+			RecursiveNameservers: NameServers,
+		}))
+	}
 	if skipCheck {
 		// 跳过预检查
 		err = client.Challenge.SetDNS01Provider(provider,
-			dns01.WrapPreCheck(func(domain, fqdn, value string, check dns01.PreCheckFunc) (bool, error) {
+			dns01.WrapPreCheck(func(ctx context.Context, domain, fqdn, value string, check dns01.PreCheckFunc) (bool, error) {
 				return true, nil
 			}),
 		)
@@ -969,34 +976,31 @@ func Apply(cfg map[string]any, logger *public.Logger) (map[string]any, error) {
 		start := time.Now()
 		if ignoreCheck {
 			err = client.Challenge.SetDNS01Provider(provider,
-				dns01.AddRecursiveNameservers(NameServers),
-				dns01.WrapPreCheck(func(domain, fqdn, value string, check dns01.PreCheckFunc) (bool, error) {
-					ok, err := check(fqdn, value)
+				dns01.WrapPreCheck(func(ctx context.Context, domain, fqdn, value string, check dns01.PreCheckFunc) (bool, error) {
+					ok, err := check(ctx, fqdn, value)
 					elapsed := time.Since(start)
 					if err != nil {
-						log.Printf("[WARN] DNS precheck error for %s: %v", fqdn, err)
+						logger.Debug(fmt.Sprintf("[WARN] DNS precheck error for %s: %v", fqdn, err))
 						if elapsed >= maxWait {
-							log.Printf("[WARN] Precheck error but forcing continue due to timeout for %s", fqdn)
+							logger.Debug(fmt.Sprintf("[WARN] Precheck error but forcing continue due to timeout for %s", fqdn))
 							return true, nil
 						}
 						return false, nil
 					}
 					if ok {
-						log.Printf("[OK] TXT record for %s is present.", fqdn)
+						logger.Debug(fmt.Sprintf("[OK] TXT record for %s is present.", fqdn))
 						return true, nil
 					}
 					if elapsed >= maxWait {
-						log.Printf("[WARN] TXT record for %s not found after %v, forcing continue.", fqdn, elapsed)
+						logger.Debug(fmt.Sprintf("[WARN] TXT record for %s not found after %v, forcing continue.", fqdn, elapsed))
 						return true, nil
 					}
-					log.Printf("[INFO] TXT record for %s not yet found, waiting... elapsed %v", fqdn, elapsed)
+					logger.Debug(fmt.Sprintf("[INFO] TXT record for %s not yet found, waiting... elapsed %v", fqdn, elapsed))
 					return false, nil
 				}),
 			)
 		} else {
-			err = client.Challenge.SetDNS01Provider(provider,
-				dns01.AddRecursiveNameservers(NameServers),
-			)
+			err = client.Challenge.SetDNS01Provider(provider)
 		}
 	}
 	if err != nil {
@@ -1005,15 +1009,17 @@ func Apply(cfg map[string]any, logger *public.Logger) (map[string]any, error) {
 
 	// fmt.Println(strings.Split(domains, ","))
 	request := certificate.ObtainRequest{
-		Domains: domainArr,
-		Bundle:  true,
+		Domains:         domainArr,
+		Bundle:          true,
+		KeyType:         AlgorithmMap[algorithm],
+		EnableCommonName: true,
 	}
 	// CA 支持 ARI 时，lego 会把 ReplacesCertID 转成 newOrder 的 replaces 字段。
 	if replacesCertID != "" {
 		request.ReplacesCertID = replacesCertID
 	}
 
-	certObj, err := client.Certificate.Obtain(request)
+	certObj, err := client.Certificate.Obtain(context.Background(), request)
 	if err != nil {
 		return nil, err
 	}

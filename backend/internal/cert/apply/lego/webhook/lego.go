@@ -2,8 +2,9 @@ package webhook
 
 import (
 	"ALLinSSL/backend/public"
+	"context"
 	"fmt"
-	"github.com/go-acme/lego/v4/challenge/dns01"
+	"github.com/go-acme/lego/v5/challenge/dns01"
 	"time"
 )
 
@@ -54,18 +55,18 @@ func (d *DNSProvider) Timeout() (timeout, interval time.Duration) {
 	return d.config.PropagationTimeout, d.config.PollingInterval
 }
 
-func (d *DNSProvider) Present(domain, token, keyAuth string) error {
+func (d *DNSProvider) Present(ctx context.Context, domain, token, keyAuth string) error {
 	d.config.WebhookConfig.Data = d.dataTemp
-	return d.send(domain, token, keyAuth, "present")
+	return d.send(ctx, domain, token, keyAuth, "present")
 }
 
-func (d *DNSProvider) CleanUp(domain, token, keyAuth string) error {
+func (d *DNSProvider) CleanUp(ctx context.Context, domain, token, keyAuth string) error {
 	d.config.WebhookConfig.Data = d.dataTemp
-	return d.send(domain, token, keyAuth, "cleanup")
+	return d.send(ctx, domain, token, keyAuth, "cleanup")
 }
 
-func (d *DNSProvider) send(domain, token, keyAuth, action string) error {
-	info := dns01.GetChallengeInfo(domain, keyAuth)
+func (d *DNSProvider) send(ctx context.Context, domain, token, keyAuth, action string) error {
+	info := dns01.GetChallengeInfo(ctx, domain, keyAuth)
 
 	data, err := public.ReplaceJSONPlaceholders(d.config.WebhookConfig.Data, map[string]interface{}{"domain": info.EffectiveFQDN, "token": token, "keyAuth": info.Value, "action": action})
 	if err != nil {

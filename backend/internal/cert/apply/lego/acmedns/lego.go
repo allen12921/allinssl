@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/go-acme/lego/v4/challenge"
-	"github.com/go-acme/lego/v4/challenge/dns01"
-	legoacmedns "github.com/go-acme/lego/v4/providers/dns/acmedns"
+	"github.com/go-acme/lego/v5/challenge"
+	"github.com/go-acme/lego/v5/challenge/dns01"
+	legoacmedns "github.com/go-acme/lego/v5/providers/dns/acmedns"
 	"github.com/nrdcg/goacmedns"
 )
 
@@ -81,13 +81,13 @@ func createTempCredentialsFile(credentials string) (string, error) {
 	return tempFile.Name(), nil
 }
 
-func (p *singleAccountProvider) Present(domain, _, keyAuth string) error {
-	info := dns01.GetChallengeInfo(domain, keyAuth)
+func (p *singleAccountProvider) Present(ctx context.Context, domain, _, keyAuth string) error {
+	info := dns01.GetChallengeInfo(ctx, domain, keyAuth)
 
-	return p.client.UpdateTXTRecord(context.Background(), p.account, info.Value)
+	return p.client.UpdateTXTRecord(ctx, p.account, info.Value)
 }
 
-func (p *singleAccountProvider) CleanUp(_, _, _ string) error {
+func (p *singleAccountProvider) CleanUp(_ context.Context, _, _, _ string) error {
 	return nil
 }
 
