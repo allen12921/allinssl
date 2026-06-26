@@ -10,4 +10,4 @@ plugins/upyun/upyun
 *_test.go
 *.exe
 *.syso
-plan.md
+plans/
