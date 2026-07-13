@@ -91,7 +91,9 @@ export default defineComponent({
       try {
         const { data } = await getAccountURI({ email: param.value.email, ca: param.value.ca }).fetch()
         accounturi.value = (data as any)?.accounturi || ''
-      } catch {
+      } catch (error) {
+        // getAccountURI 失败时 useAxios 已展示后端返回的具体错误提示，这里仅记录日志避免重复/覆盖提示
+        console.error('获取账号URI失败:', error)
         accounturi.value = ''
       } finally {
         loadingAccounturi.value = false
