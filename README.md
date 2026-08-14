@@ -197,14 +197,139 @@ print(urllib.request.urlopen(req).read().decode())
 
 ### 可用接口
 
+> ⚠️ API Key 校验为全局中间件，附带正确的 `api_token` + `timestamp` 即可访问下列任意接口（等同于登录态权限），请妥善保管密钥，不要泄露给不可信方。
+
+<details>
+<summary><strong>证书管理</strong> <code>/v1/cert</code></summary>
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET  | `/v1/cert/download?id={id}` | 下载证书 zip |
-| POST | `/v1/cert/upload_cert` | 上传证书（`cert` + `key` 字段） |
 | POST | `/v1/cert/get_list` | 获取证书列表 |
-| POST | `/v1/workflow/execute_workflow` | 手动触发工作流 |
+| POST | `/v1/cert/upload_cert` | 上传证书（`cert` + `key` 字段） |
+| POST | `/v1/cert/update_cert` | 更新证书信息 |
+| POST | `/v1/cert/del_cert` | 删除证书 |
+| GET  | `/v1/cert/download?id={id}` | 下载证书 zip |
 
-> ⚠️ API Key 具有完整的系统访问权限，请妥善保管，不要泄露给不可信方。
+</details>
+
+<details>
+<summary><strong>ACME 账号</strong> <code>/v1/acme_account</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/acme_account/get_list` | 获取账号列表 |
+| POST | `/v1/acme_account/get_ca_list` | 获取可用 CA 列表 |
+| POST | `/v1/acme_account/add_account` | 添加账号 |
+| POST | `/v1/acme_account/del_account` | 删除账号 |
+| POST | `/v1/acme_account/upd_account` | 修改账号 |
+| POST | `/v1/acme_account/get_account_uri` | 获取账号 Account URI（配置 dns-persist-01 TXT 记录时使用） |
+
+</details>
+
+<details>
+<summary><strong>授权管理</strong> <code>/v1/access</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/access/get_list` | 获取授权列表（分页） |
+| POST | `/v1/access/get_all` | 获取全部授权（不分页） |
+| POST | `/v1/access/add_access` | 添加授权 |
+| POST | `/v1/access/upd_access` | 修改授权 |
+| POST | `/v1/access/del_access` | 删除授权 |
+| POST | `/v1/access/test_access` | 测试授权连通性 |
+| POST | `/v1/access/get_sites` | 获取站点列表（面板类授权） |
+| POST | `/v1/access/get_eab_list` | 获取 EAB 列表（分页） |
+| POST | `/v1/access/get_all_eab` | 获取全部 EAB |
+| POST | `/v1/access/add_eab` | 添加 EAB |
+| POST | `/v1/access/upd_eab` | 修改 EAB |
+| POST | `/v1/access/del_eab` | 删除 EAB |
+| POST | `/v1/access/get_plugins` | 获取部署插件列表 |
+| POST | `/v1/access/get_plugin_actions` | 获取插件支持的动作 |
+| POST | `/v1/access/get_plugin_raw_metadata` | 获取插件原始元数据 |
+
+</details>
+
+<details>
+<summary><strong>工作流</strong> <code>/v1/workflow</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/workflow/get_list` | 获取工作流列表 |
+| POST | `/v1/workflow/add_workflow` | 添加工作流 |
+| POST | `/v1/workflow/upd_workflow` | 修改工作流 |
+| POST | `/v1/workflow/del_workflow` | 删除工作流 |
+| POST | `/v1/workflow/exec_type` | 修改执行方式（定时/手动） |
+| POST | `/v1/workflow/active` | 启用 / 禁用工作流 |
+| POST | `/v1/workflow/execute_workflow` | 手动触发工作流 |
+| POST | `/v1/workflow/stop` | 终止正在执行的工作流 |
+| POST | `/v1/workflow/get_workflow_history` | 获取执行历史 |
+| POST | `/v1/workflow/get_exec_log` | 获取执行日志 |
+| POST | `/v1/workflow/del_workflow_history` | 删除执行历史 |
+
+</details>
+
+<details>
+<summary><strong>监控</strong> <code>/v1/monitor</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/monitor/get_list` | 获取监控列表 |
+| POST | `/v1/monitor/add_monitor` | 添加监控 |
+| POST | `/v1/monitor/upd_monitor` | 修改监控 |
+| POST | `/v1/monitor/del_monitor` | 删除监控 |
+| POST | `/v1/monitor/set_monitor` | 启用 / 禁用监控 |
+| POST | `/v1/monitor/get_monitor_info` | 获取监控详情 |
+| POST | `/v1/monitor/get_err_record` | 获取异常记录 |
+| POST | `/v1/monitor/file_add_monitor` | 批量导入监控 |
+| GET  | `/v1/monitor/template` | 下载批量导入模板 |
+
+</details>
+
+<details>
+<summary><strong>通知报告</strong> <code>/v1/report</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/report/get_list` | 获取通知配置列表 |
+| POST | `/v1/report/add_report` | 添加通知配置 |
+| POST | `/v1/report/upd_report` | 修改通知配置 |
+| POST | `/v1/report/del_report` | 删除通知配置 |
+| POST | `/v1/report/notify_test` | 发送测试通知 |
+
+</details>
+
+<details>
+<summary><strong>私有 CA</strong> <code>/v1/private_ca</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/private_ca/create_root_ca` | 创建根 CA |
+| POST | `/v1/private_ca/create_intermediate_ca` | 创建中间 CA |
+| POST | `/v1/private_ca/get_ca_list` | 获取 CA 列表 |
+| POST | `/v1/private_ca/del_ca` | 删除 CA |
+| POST | `/v1/private_ca/create_leaf_cert` | 签发叶子证书 |
+| POST | `/v1/private_ca/get_leaf_cert_list` | 获取叶子证书列表 |
+| POST | `/v1/private_ca/del_leaf_cert` | 删除叶子证书 |
+| GET  | `/v1/private_ca/download_cert` | 下载叶子证书 |
+
+</details>
+
+<details>
+<summary><strong>系统设置 / 概览</strong> <code>/v1/setting</code>、<code>/v1/overview</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/setting/get_setting` | 获取系统设置 |
+| POST | `/v1/setting/save_setting` | 保存系统设置 |
+| POST | `/v1/setting/save_api_key` | 生成 / 清除 API Key |
+| POST | `/v1/setting/get_version` | 获取版本信息 |
+| POST | `/v1/setting/shutdown` | 关闭服务 |
+| POST | `/v1/setting/restart` | 重启服务 |
+| GET  | `/v1/setting/download_data` | 导出数据备份 |
+| POST | `/v1/setting/upload_data` | 导入数据备份 |
+| POST | `/v1/overview/get_overviews` | 获取首页概览数据 |
+
+</details>
 
 ## 🛠️ 技术架构
 

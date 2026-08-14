@@ -117,6 +117,190 @@ go build -o allinssl cmd/main.go
 5. When multiple consecutive website anomalies are detected, the system will send alerts
 
 
+## API Key Access
+
+The system supports calling the API directly via an API Key signature, without a session login — convenient for scripted certificate automation.
+
+### Setup
+
+Go to **Settings → API Access**, click "Generate" to create a random key, and save it to enable access. Clearing the key disables API access.
+
+### Signing Algorithm
+
+```
+keyMd5    = MD5(api_key)
+api_token = MD5(timestamp + keyMd5)
+```
+
+Attach the following parameters to every request (either as a query string or form field):
+
+| Parameter | Description |
+|------|------|
+| `api_token` | The signature (lowercase hex) |
+| `timestamp` | Current Unix timestamp in seconds, must be within 5 minutes of server time |
+
+### Python Example
+
+```python
+import hashlib, time, urllib.request, urllib.parse
+
+api_key = 'your_api_key'
+timestamp = str(int(time.time()))
+key_md5   = hashlib.md5(api_key.encode()).hexdigest()
+api_token = hashlib.md5((timestamp + key_md5).encode()).hexdigest()
+
+# Download a certificate (id is the certificate ID)
+url  = 'http://your-server/v1/cert/download?id=1'
+url += f'&api_token={api_token}&timestamp={timestamp}'
+urllib.request.urlretrieve(url, 'cert.zip')
+
+# Upload a certificate
+data = urllib.parse.urlencode({
+    'api_token': api_token,
+    'timestamp': timestamp,
+    'cert': open('cert.pem').read(),
+    'key':  open('key.pem').read(),
+}).encode()
+req = urllib.request.Request('http://your-server/v1/cert/upload_cert', data)
+print(urllib.request.urlopen(req).read().decode())
+```
+
+### Available Endpoints
+
+> ⚠️ API Key verification runs as a global middleware — any request carrying a valid `api_token` + `timestamp` can reach any endpoint below (equivalent to session-login privileges). Keep the key safe and never share it with untrusted parties.
+
+<details>
+<summary><strong>Certificates</strong> <code>/v1/cert</code></summary>
+
+| Method | Path | Description |
+|------|------|------|
+| POST | `/v1/cert/get_list` | List certificates |
+| POST | `/v1/cert/upload_cert` | Upload a certificate (`cert` + `key` fields) |
+| POST | `/v1/cert/update_cert` | Update certificate info |
+| POST | `/v1/cert/del_cert` | Delete a certificate |
+| GET  | `/v1/cert/download?id={id}` | Download certificate as zip |
+
+</details>
+
+<details>
+<summary><strong>ACME Accounts</strong> <code>/v1/acme_account</code></summary>
+
+| Method | Path | Description |
+|------|------|------|
+| POST | `/v1/acme_account/get_list` | List accounts |
+| POST | `/v1/acme_account/get_ca_list` | List available CAs |
+| POST | `/v1/acme_account/add_account` | Add an account |
+| POST | `/v1/acme_account/del_account` | Delete an account |
+| POST | `/v1/acme_account/upd_account` | Update an account |
+| POST | `/v1/acme_account/get_account_uri` | Get the account URI (used to configure dns-persist-01 TXT records) |
+
+</details>
+
+<details>
+<summary><strong>Access Credentials</strong> <code>/v1/access</code></summary>
+
+| Method | Path | Description |
+|------|------|------|
+| POST | `/v1/access/get_list` | List credentials (paginated) |
+| POST | `/v1/access/get_all` | List all credentials (no pagination) |
+| POST | `/v1/access/add_access` | Add a credential |
+| POST | `/v1/access/upd_access` | Update a credential |
+| POST | `/v1/access/del_access` | Delete a credential |
+| POST | `/v1/access/test_access` | Test credential connectivity |
+| POST | `/v1/access/get_sites` | List sites (panel-based credentials) |
+| POST | `/v1/access/get_eab_list` | List EAB entries (paginated) |
+| POST | `/v1/access/get_all_eab` | List all EAB entries |
+| POST | `/v1/access/add_eab` | Add an EAB entry |
+| POST | `/v1/access/upd_eab` | Update an EAB entry |
+| POST | `/v1/access/del_eab` | Delete an EAB entry |
+| POST | `/v1/access/get_plugins` | List deployment plugins |
+| POST | `/v1/access/get_plugin_actions` | List actions supported by a plugin |
+| POST | `/v1/access/get_plugin_raw_metadata` | Get a plugin's raw metadata |
+
+</details>
+
+<details>
+<summary><strong>Workflows</strong> <code>/v1/workflow</code></summary>
+
+| Method | Path | Description |
+|------|------|------|
+| POST | `/v1/workflow/get_list` | List workflows |
+| POST | `/v1/workflow/add_workflow` | Add a workflow |
+| POST | `/v1/workflow/upd_workflow` | Update a workflow |
+| POST | `/v1/workflow/del_workflow` | Delete a workflow |
+| POST | `/v1/workflow/exec_type` | Change execution mode (scheduled/manual) |
+| POST | `/v1/workflow/active` | Enable / disable a workflow |
+| POST | `/v1/workflow/execute_workflow` | Trigger a workflow manually |
+| POST | `/v1/workflow/stop` | Stop a running workflow |
+| POST | `/v1/workflow/get_workflow_history` | Get execution history |
+| POST | `/v1/workflow/get_exec_log` | Get execution logs |
+| POST | `/v1/workflow/del_workflow_history` | Delete execution history |
+
+</details>
+
+<details>
+<summary><strong>Monitoring</strong> <code>/v1/monitor</code></summary>
+
+| Method | Path | Description |
+|------|------|------|
+| POST | `/v1/monitor/get_list` | List monitors |
+| POST | `/v1/monitor/add_monitor` | Add a monitor |
+| POST | `/v1/monitor/upd_monitor` | Update a monitor |
+| POST | `/v1/monitor/del_monitor` | Delete a monitor |
+| POST | `/v1/monitor/set_monitor` | Enable / disable a monitor |
+| POST | `/v1/monitor/get_monitor_info` | Get monitor details |
+| POST | `/v1/monitor/get_err_record` | Get error records |
+| POST | `/v1/monitor/file_add_monitor` | Bulk-import monitors |
+| GET  | `/v1/monitor/template` | Download the bulk-import template |
+
+</details>
+
+<details>
+<summary><strong>Notifications</strong> <code>/v1/report</code></summary>
+
+| Method | Path | Description |
+|------|------|------|
+| POST | `/v1/report/get_list` | List notification channels |
+| POST | `/v1/report/add_report` | Add a notification channel |
+| POST | `/v1/report/upd_report` | Update a notification channel |
+| POST | `/v1/report/del_report` | Delete a notification channel |
+| POST | `/v1/report/notify_test` | Send a test notification |
+
+</details>
+
+<details>
+<summary><strong>Private CA</strong> <code>/v1/private_ca</code></summary>
+
+| Method | Path | Description |
+|------|------|------|
+| POST | `/v1/private_ca/create_root_ca` | Create a root CA |
+| POST | `/v1/private_ca/create_intermediate_ca` | Create an intermediate CA |
+| POST | `/v1/private_ca/get_ca_list` | List CAs |
+| POST | `/v1/private_ca/del_ca` | Delete a CA |
+| POST | `/v1/private_ca/create_leaf_cert` | Issue a leaf certificate |
+| POST | `/v1/private_ca/get_leaf_cert_list` | List leaf certificates |
+| POST | `/v1/private_ca/del_leaf_cert` | Delete a leaf certificate |
+| GET  | `/v1/private_ca/download_cert` | Download a leaf certificate |
+
+</details>
+
+<details>
+<summary><strong>Settings / Overview</strong> <code>/v1/setting</code>, <code>/v1/overview</code></summary>
+
+| Method | Path | Description |
+|------|------|------|
+| POST | `/v1/setting/get_setting` | Get system settings |
+| POST | `/v1/setting/save_setting` | Save system settings |
+| POST | `/v1/setting/save_api_key` | Generate / clear the API Key |
+| POST | `/v1/setting/get_version` | Get version info |
+| POST | `/v1/setting/shutdown` | Shut down the service |
+| POST | `/v1/setting/restart` | Restart the service |
+| GET  | `/v1/setting/download_data` | Export a data backup |
+| POST | `/v1/setting/upload_data` | Import a data backup |
+| POST | `/v1/overview/get_overviews` | Get home page overview data |
+
+</details>
+
 ## Command Line Operations
 
 ```bash
