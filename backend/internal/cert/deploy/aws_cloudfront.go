@@ -11,12 +11,19 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/cloudfront"
 	cftypes "github.com/aws/aws-sdk-go-v2/service/cloudfront/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 )
+
+// cloudFrontDistributionInterval spaces out GetDistribution/UpdateDistribution
+// calls across multiple distributions. CloudFront's management API throttles
+// bursts of config-change requests (undocumented exact threshold), and firing
+// updates for several distributions back-to-back reliably triggers it.
+const cloudFrontDistributionInterval = 3 * time.Second
 
 // DeployAWSCloudFront uploads the certificate to AWS IAM and associates it with a
 // CloudFront distribution. This is the correct approach for AWS China regions where
@@ -119,9 +126,17 @@ func DeployAWSCloudFront(cfg map[string]any, logger *public.Logger) error {
 	iamCertID := aws.ToString(uploadResp.ServerCertificateMetadata.ServerCertificateId)
 
 	// CloudFront is always accessed via its own endpoint region.
+	// Retries are widened beyond the SDK default (3 attempts / 20s max backoff)
+	// because CloudFront's config-change throttling window can outlast that.
 	cfCfg, err := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithRegion(region),
 		awsconfig.WithCredentialsProvider(creds),
+		awsconfig.WithRetryer(func() aws.Retryer {
+			return retry.NewStandard(func(o *retry.StandardOptions) {
+				o.MaxAttempts = 8
+				o.MaxBackoff = 30 * time.Second
+			})
+		}),
 	)
 	if err != nil {
 		return fmt.Errorf("CloudFront 配置失败: %v", err)
@@ -130,11 +145,18 @@ func DeployAWSCloudFront(cfg map[string]any, logger *public.Logger) error {
 	cfClient := cloudfront.NewFromConfig(cfCfg)
 
 	deployed := 0
+	first := true
 	for _, distributionID := range strings.Split(domainRaw, ",") {
 		distributionID = strings.TrimSpace(distributionID)
 		if distributionID == "" {
 			continue
 		}
+		if !first {
+			// Space out requests across distributions to avoid bursting the
+			// CloudFront management API's (undocumented) throttling threshold.
+			time.Sleep(cloudFrontDistributionInterval)
+		}
+		first = false
 		logger.Info("正在部署 Distribution ID: " + distributionID)
 
 		// Fetch current distribution config and ETag (required for update).
