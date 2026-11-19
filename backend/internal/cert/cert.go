@@ -2,7 +2,13 @@ package cert
 
 import (
 	"ALLinSSL/backend/public"
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -232,6 +238,8 @@ func SaveCert(source, key, cert, issuerCert, historyId string) (string, error) {
 // UpdateCert 更新一张手动上传（source=="upload"）的证书。
 // 契约：返回 len(uncovered) > 0 且 err == nil 时，表示新证书域名未覆盖原证书域名，
 // 证书「未写库」，需用户确认后带 force=true 重试；此时 newSha256 为空。
+// 证书更新与关联工作流同步（sha256 替换、上传节点匹配域名）在同一个 BEGIN IMMEDIATE 事务内完成，
+// 任一步失败整体回滚；并发编辑会在写锁上排队，不会互相覆盖。
 func UpdateCert(id, certPEM, keyPEM string, force bool) (oldSha256, newSha256 string, uncovered []string, err error) {
 	if err = public.ValidateSSLCertificate(certPEM, keyPEM); err != nil {
 		return
@@ -246,40 +254,60 @@ func UpdateCert(id, certPEM, keyPEM string, force bool) (oldSha256, newSha256 st
 		err = fmt.Errorf("获取 SHA256 失败: %v", err)
 		return
 	}
+	// 解析新证书元数据
+	domains := public.ExtractCertDomains(certObj)
 
-	// 读取当前记录，校验 source 必须为 upload
 	s, err := GetSqlite()
 	if err != nil {
 		return
 	}
 	defer s.Close()
-	rows, err := s.Where("id=?", []interface{}{id}).Select()
-	if err != nil || len(rows) == 0 {
+	ctx := context.Background()
+	conn, err := s.Conn.Conn(ctx)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	// 开始即获取写锁，读取旧记录、校验、写证书、同步工作流都在锁内完成
+	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			conn.ExecContext(ctx, "ROLLBACK")
+		}
+	}()
+
+	// 读取当前记录，校验 source 必须为 upload
+	var (
+		dbID                                int64
+		source, oldSha, oldCertPEM, oldDoms sql.NullString
+	)
+	err = conn.QueryRowContext(ctx, "SELECT id, source, sha256, cert, domains FROM cert WHERE id=?", id).
+		Scan(&dbID, &source, &oldSha, &oldCertPEM, &oldDoms)
+	if err != nil {
 		err = fmt.Errorf("证书不存在")
 		return
 	}
-	if source, _ := rows[0]["source"].(string); source != "upload" {
+	if source.String != "upload" {
 		err = fmt.Errorf("仅支持编辑手动上传的证书")
 		return
 	}
-	oldSha256, _ = rows[0]["sha256"].(string)
-
-	// 解析新证书元数据
-	domains := public.ExtractCertDomains(certObj)
+	oldSha256 = oldSha.String
 
 	// 校验新证书域名是否覆盖原证书域名，未覆盖且未强制时提前返回（不做任何变更）。
 	// 以重新解析旧证书 PEM 为准（真源），而非信任去规范化的 domains 缓存列；
 	// 仅当旧证书缺失/解析失败时才回退到缓存列。
 	if !force {
 		var oldDomains []string
-		if oldCertPEM, _ := rows[0]["cert"].(string); oldCertPEM != "" {
-			if oldObj, e := public.ParseCertificate([]byte(oldCertPEM)); e == nil {
+		if oldCertPEM.String != "" {
+			if oldObj, e := public.ParseCertificate([]byte(oldCertPEM.String)); e == nil {
 				oldDomains = public.ExtractCertDomains(oldObj)
 			}
 		}
 		if oldDomains == nil {
-			oldDomainsStr, _ := rows[0]["domains"].(string)
-			oldDomains = strings.Split(oldDomainsStr, ",")
+			oldDomains = strings.Split(oldDoms.String, ",")
 		}
 		uncovered = public.UncoveredDomains(domains, oldDomains)
 		if len(uncovered) > 0 {
@@ -296,41 +324,179 @@ func UpdateCert(id, certPEM, keyPEM string, force bool) (oldSha256, newSha256 st
 	}
 
 	now := time.Now().Format("2006-01-02 15:04:05")
-	_, err = s.Where("id=?", []interface{}{id}).Update(map[string]interface{}{
-		"cert":        certPEM,
-		"key":         keyPEM,
-		"sha256":      newSha256,
-		"domains":     strings.Join(domains, ","),
-		"issuer":      caName,
-		"start_time":  certObj.NotBefore.Format("2006-01-02 15:04:05"),
-		"end_time":    certObj.NotAfter.Format("2006-01-02 15:04:05"),
-		"end_day":     fmt.Sprintf("%d", int(certObj.NotAfter.Sub(time.Now()).Hours()/24)),
-		"update_time": now,
-	})
+	newDomains := strings.Join(domains, ",")
+	_, err = conn.ExecContext(ctx,
+		"UPDATE cert SET cert=?, key=?, sha256=?, domains=?, issuer=?, start_time=?, end_time=?, end_day=?, update_time=? WHERE id=?",
+		certPEM, keyPEM, newSha256, newDomains, caName,
+		certObj.NotBefore.Format("2006-01-02 15:04:05"),
+		certObj.NotAfter.Format("2006-01-02 15:04:05"),
+		fmt.Sprintf("%d", int(certObj.NotAfter.Sub(time.Now()).Hours()/24)),
+		now, dbID)
 	if err != nil {
 		return
 	}
 
-	// 把所有 workflow content 中的旧 sha256 替换为新 sha256
+	// 把所有 workflow content 中的旧 sha256 替换为新 sha256，
+	// 并同步引用该证书的上传节点保存的匹配域名（临期时按它查找本地替代证书）。
+	if err = syncCertRefsInWorkflows(ctx, conn, oldSha256, newSha256, strconv.FormatInt(dbID, 10), newDomains); err != nil {
+		err = fmt.Errorf("同步关联工作流失败，证书未更新: %v", err)
+		return
+	}
+	if _, err = conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return
+	}
+	committed = true
+	return
+}
+
+// rewriteWorkflowContent 计算替换证书 sha256、同步上传节点域名后的工作流内容；无变化时原样返回。
+// content 不是合法 JSON 时只做 sha256 替换（与原逻辑一致）：这种工作流在 RunWorkflow 解析阶段就会失败，不会执行。
+func rewriteWorkflowContent(content, oldSha256, newSha256 string, certRefs []string, newDomains string) string {
+	newContent := content
 	if oldSha256 != "" && oldSha256 != newSha256 {
-		ws, _ := getWorkflowsBySha256s()
-		for _, w := range ws {
-			content, _ := w["content"].(string)
-			if !strings.Contains(content, oldSha256) {
-				continue
-			}
-			newContent := strings.ReplaceAll(content, oldSha256, newSha256)
-			wid := fmt.Sprintf("%v", w["id"])
-			sw, e2 := public.NewSqlite("data/data.db", "")
-			if e2 != nil {
-				continue
-			}
-			sw.TableName = "workflow"
-			sw.Where("id=?", []interface{}{wid}).Update(map[string]interface{}{"content": newContent})
-			sw.Close()
+		newContent = strings.ReplaceAll(newContent, oldSha256, newSha256)
+	}
+	if synced, changed, e := syncUploadNodeDomains(newContent, certRefs, newDomains); e == nil && changed {
+		newContent = synced
+	}
+	return newContent
+}
+
+// syncCertRefsInWorkflows 在调用方的事务连接上把证书变更同步到所有工作流，任一写入失败即返回错误。
+func syncCertRefsInWorkflows(ctx context.Context, conn *sql.Conn, oldSha256, newSha256, certID, newDomains string) error {
+	certRefs := []string{newSha256, certID}
+	rows, err := conn.QueryContext(ctx, "SELECT id, name, content FROM workflow")
+	if err != nil {
+		return err
+	}
+	type wf struct {
+		id            any
+		name, content sql.NullString
+	}
+	var ws []wf
+	for rows.Next() {
+		var w wf
+		if err := rows.Scan(&w.id, &w.name, &w.content); err != nil {
+			rows.Close()
+			return err
+		}
+		ws = append(ws, w)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, w := range ws {
+		newContent := rewriteWorkflowContent(w.content.String, oldSha256, newSha256, certRefs, newDomains)
+		if newContent == w.content.String {
+			continue
+		}
+		if _, err := conn.ExecContext(ctx, "UPDATE workflow SET content=? WHERE id=?", newContent, w.id); err != nil {
+			return fmt.Errorf("工作流「%s」: %v", w.name.String, err)
 		}
 	}
-	return
+	return nil
+}
+
+// syncUploadNodeDomains 把工作流中引用指定证书（cert_id 为 sha256 或数据库 id）的上传节点的
+// domains 更新为 newDomains。上传节点的 domains 由前端在选择证书时自动填入，开启
+// use_local_cert 后会在证书临期时按它查找替代证书；证书被编辑后若不同步，会按旧域名匹配。
+// 仅在有节点被修改时才重新序列化 content。
+func syncUploadNodeDomains(content string, certRefs []string, newDomains string) (string, bool, error) {
+	// 新证书解析不出任何域名时不同步：空 domains 会让开启 use_local_cert 的上传节点每次执行都报错。
+	if content == "" || newDomains == "" {
+		return content, false, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(content))
+	dec.UseNumber() // 保持数字原样，避免大整数被转成科学计数法
+	var root any
+	if err := dec.Decode(&root); err != nil {
+		return content, false, err
+	}
+	// 第一个值之后还有内容说明存储的 JSON 不合法，按不合法处理，避免重写时丢掉后缀
+	if _, err := dec.Token(); err != io.EOF {
+		return content, false, fmt.Errorf("工作流内容不是单个 JSON 对象")
+	}
+	refs := make(map[string]bool, len(certRefs))
+	for _, r := range certRefs {
+		if r != "" && r != "<nil>" {
+			refs[r] = true
+		}
+	}
+	changed := false
+	// 只沿 WorkflowNode 的 childNode / conditionNodes 遍历，不进入节点 config，避免改到插件业务数据。
+	var walk func(v any)
+	walk = func(v any) {
+		node, ok := v.(map[string]any)
+		if !ok {
+			return
+		}
+		if t, _ := node["type"].(string); t == "upload" {
+			if cfg, ok := node["config"].(map[string]any); ok && refs[normalizeCertID(cfg["cert_id"])] {
+				if cur, _ := cfg["domains"].(string); !sameDomainSet(cur, newDomains) {
+					cfg["domains"] = newDomains
+					changed = true
+				}
+			}
+		}
+		walk(node["childNode"])
+		if branches, ok := node["conditionNodes"].([]any); ok {
+			for _, b := range branches {
+				walk(b)
+			}
+		}
+	}
+	walk(root)
+	if !changed {
+		return content, false, nil
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(root); err != nil {
+		return content, false, err
+	}
+	return strings.TrimSuffix(buf.String(), "\n"), true, nil
+}
+
+// normalizeCertID 把上传节点的 cert_id 转成字符串；整数值的数字（如 7、7.0）统一为 "7"。
+func normalizeCertID(v any) string {
+	switch id := v.(type) {
+	case string:
+		return id
+	case json.Number:
+		if i, err := id.Int64(); err == nil {
+			return strconv.FormatInt(i, 10)
+		}
+		if f, err := id.Float64(); err == nil && f == math.Trunc(f) && math.Abs(f) < 1<<53 {
+			return strconv.FormatInt(int64(f), 10)
+		}
+		return id.String()
+	}
+	return ""
+}
+
+// sameDomainSet 比较两个逗号分隔的域名列表是否为同一集合，只忽略顺序和重复项。
+// 与运行时匹配（apply.FindMatchedCert → public.ContainsAllIgnoreBRepeats）一致，按原字符串精确比较。
+func sameDomainSet(a, b string) bool {
+	toSet := func(s string) map[string]bool {
+		set := map[string]bool{}
+		for _, d := range strings.Split(s, ",") {
+			set[d] = true
+		}
+		return set
+	}
+	sa, sb := toSet(a), toSet(b)
+	if len(sa) != len(sb) {
+		return false
+	}
+	for d := range sa {
+		if !sb[d] {
+			return false
+		}
+	}
+	return true
 }
 
 // GetWorkflowRefs returns workflows associated with a cert identified by its db id and sha256.
