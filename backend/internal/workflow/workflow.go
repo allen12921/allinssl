@@ -3,7 +3,9 @@ package workflow
 import (
 	"ALLinSSL/backend/public"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -139,17 +141,35 @@ func UpdExecType(id, execType string) error {
 	if err != nil {
 		return err
 	}
-	data, err := s.Where("id=?", []interface{}{id}).Select()
-	s.Close()
+	defer s.Close()
+	// 读改写整份 content，必须与读取放在同一个 BEGIN IMMEDIATE 事务里，
+	// 否则会覆盖期间的并发写入（如编辑手动证书时同步到上传节点的 cert_id / domains）。
+	ctx := context.Background()
+	conn, err := s.Conn.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	if len(data) == 0 {
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			conn.ExecContext(ctx, "ROLLBACK")
+		}
+	}()
+	var stored sql.NullString
+	err = conn.QueryRowContext(ctx, "SELECT content FROM workflow WHERE id=?", id).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("工作流不存在")
+	}
+	if err != nil {
+		return err
 	}
 	// 内容里的开始节点也保存了触发方式，需与列表同步，否则编辑时仍显示旧值
 	var node map[string]any
-	content, _ := data[0]["content"].(string)
+	content := stored.String
 	if err = json.Unmarshal([]byte(content), &node); err != nil {
 		return fmt.Errorf("检测到工作流配置有问题：%v", err)
 	}
@@ -163,10 +183,15 @@ func UpdExecType(id, execType string) error {
 	if err != nil {
 		return err
 	}
-	return UpdDb(id, map[string]interface{}{
-		"exec_type": execType,
-		"content":   string(body),
-	})
+	if _, err = conn.ExecContext(ctx, "UPDATE workflow SET exec_type=?, content=?, update_time=? WHERE id=?",
+		execType, string(body), time.Now().Format("2006-01-02 15:04:05"), id); err != nil {
+		return err
+	}
+	if _, err = conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func UpdActive(id, active string) error {

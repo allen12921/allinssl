@@ -211,11 +211,15 @@ func SaveCert(source, key, cert, issuerCert, historyId string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("获取 SHA256 失败: %v", err)
 	}
+	// 先校验再去重：库里已有的旧证书重新上传也要经过同样的规则
+	identifiers := public.ExtractCertDomains(certObj)
+	if err := checkIdentifiersStorable(identifiers); err != nil {
+		return "", err
+	}
 	if d, _ := GetCert(sha256); d != nil {
 		return sha256, nil
 	}
-
-	domainList := strings.Join(public.ExtractCertDomains(certObj), ",")
+	domainList := strings.Join(identifiers, ",")
 
 	// 提取 CA 名称（Issuer 的组织名）
 	caName := "UNKNOWN"
@@ -234,6 +238,18 @@ func SaveCert(source, key, cert, issuerCert, historyId string) (string, error) {
 		return "", fmt.Errorf("保存证书失败: %v", err)
 	}
 	return sha256, nil
+}
+
+// checkIdentifiersStorable 校验证书标识能否以逗号连接存储。证书的 domains 列和上传节点的匹配条件都是
+// 逗号连接的，标识本身含逗号（合法的 DNS 名称和 IP 都不会）会被拆成多个，导致匹配条件错误。
+// 上传与编辑共用这条规则。
+func checkIdentifiersStorable(identifiers []string) error {
+	for _, d := range identifiers {
+		if strings.Contains(d, ",") {
+			return fmt.Errorf("证书标识「%s」包含逗号，不是合法的域名或 IP，无法保存", d)
+		}
+	}
+	return nil
 }
 
 // UpdateCert 更新一张手动上传（source=="upload"）的证书。
@@ -257,12 +273,15 @@ func UpdateCert(id, certPEM, keyPEM string, force bool) (oldSha256, newSha256 st
 	}
 	// 解析新证书元数据
 	// 去掉空白条目（证书可带空的 DNS SAN）。没有任何域名的证书（如只有 URI SAN 的客户端证书）仍允许编辑，
-	// 但若有开启本地匹配的上传节点引用它，同步时会报错回滚（见 syncUploadNodeDomains）。
+	// 但若有开启本地匹配的上传节点引用它，同步时会报错回滚（见 planUploadNode，标识含逗号时同理）。
 	var domains []string
 	for _, d := range public.ExtractCertDomains(certObj) {
 		if strings.TrimSpace(d) != "" {
 			domains = append(domains, d)
 		}
+	}
+	if err = checkIdentifiersStorable(domains); err != nil {
+		return
 	}
 
 	s, err := GetSqlite()
@@ -346,7 +365,7 @@ func UpdateCert(id, certPEM, keyPEM string, force bool) (oldSha256, newSha256 st
 
 	// 把所有 workflow content 中的旧 sha256 替换为新 sha256，
 	// 并同步引用该证书的上传节点保存的匹配域名（临期时按它查找本地替代证书）。
-	if err = syncCertRefsInWorkflows(ctx, conn, oldSha256, newSha256, dbID, newDomains); err != nil {
+	if err = syncCertRefsInWorkflows(ctx, conn, oldSha256, newSha256, dbID, domains); err != nil {
 		err = fmt.Errorf("同步关联工作流失败，证书未更新: %v", err)
 		return
 	}
@@ -445,26 +464,51 @@ func execCertID(v any) (string, bool) {
 	return "", false
 }
 
-// rewriteWorkflowContent 计算替换证书 sha256、同步上传节点域名后的工作流内容；无变化时原样返回。
-// 需要同步域名但无法安全重写时返回错误，由调用方回滚整个证书编辑。
-func rewriteWorkflowContent(content, oldSha256, newSha256 string, isRef func(string) bool, newDomains string) (string, error) {
-	newContent := content
-	if oldSha256 != "" && oldSha256 != newSha256 {
-		newContent = strings.ReplaceAll(newContent, oldSha256, newSha256)
+// certChange 描述一次证书编辑对工作流的影响。
+type certChange struct {
+	oldSha  string            // 编辑前的 sha256
+	newSha  string            // 编辑后的 sha256
+	domains string            // 新证书域名，逗号连接（上传节点 domains 的存储格式）
+	usable  bool              // domains 能否作为本地匹配条件：为空或某个标识本身含逗号时不能
+	isRef   func(string) bool // cert_id（按执行器规则转成的文本）是否指向被编辑的证书
+}
+
+// newCertChange 根据新证书的标识列表构造 certChange。
+func newCertChange(oldSha, newSha string, domains []string, isRef func(string) bool) certChange {
+	usable := len(domains) > 0
+	for _, d := range domains {
+		if strings.Contains(d, ",") {
+			usable = false
+		}
 	}
-	synced, changed, err := syncUploadNodeDomains(newContent, isRef, newDomains)
+	return certChange{oldSha: oldSha, newSha: newSha, domains: strings.Join(domains, ","), usable: usable, isRef: isRef}
+}
+
+// rewriteWorkflowContent 计算证书编辑后的工作流内容；无变化时原样返回。
+// 执行器能解码的工作流交给 syncUploadNodes 在解码后的 JSON 上处理（sha256 替换与上传节点同步）；
+// 直接在原文上替换可能命中转义序列（如 \u0031 后紧跟旧 sha 的其余部分）而改坏引用。
+// 执行器解码不了的内容本来就不会被执行，沿用原来的纯文本替换。
+func rewriteWorkflowContent(content string, ch certChange) (string, error) {
+	out, changed, err := syncUploadNodes(content, ch)
+	if errors.Is(err, errNotExecutable) {
+		if ch.oldSha != "" && ch.oldSha != ch.newSha {
+			return strings.ReplaceAll(content, ch.oldSha, ch.newSha), nil
+		}
+		return content, nil
+	}
 	if err != nil {
 		return content, err
 	}
 	if changed {
-		newContent = synced
+		return out, nil
 	}
-	return newContent, nil
+	return content, nil
 }
 
 // syncCertRefsInWorkflows 在调用方的事务连接上把证书变更同步到所有工作流，任一失败即返回错误。
-func syncCertRefsInWorkflows(ctx context.Context, conn *sql.Conn, oldSha256, newSha256 string, dbID int64, newDomains string) error {
+func syncCertRefsInWorkflows(ctx context.Context, conn *sql.Conn, oldSha256, newSha256 string, dbID int64, domains []string) error {
 	matcher := newCertRefMatcher(ctx, conn, dbID, newSha256)
+	ch := newCertChange(oldSha256, newSha256, domains, matcher.match)
 	rows, err := conn.QueryContext(ctx, "SELECT id, name, content FROM workflow")
 	if err != nil {
 		return err
@@ -488,7 +532,7 @@ func syncCertRefsInWorkflows(ctx context.Context, conn *sql.Conn, oldSha256, new
 	}
 	rows.Close()
 	for _, w := range ws {
-		newContent, err := rewriteWorkflowContent(w.content.String, oldSha256, newSha256, matcher.match, newDomains)
+		newContent, err := rewriteWorkflowContent(w.content.String, ch)
 		if err == nil && matcher.err != nil {
 			err = matcher.err
 		}
@@ -505,30 +549,99 @@ func syncCertRefsInWorkflows(ctx context.Context, conn *sql.Conn, oldSha256, new
 	return nil
 }
 
-// errDomainlessLocalMatch 表示新证书没有域名，但有开启本地匹配的上传节点引用它。
-var errDomainlessLocalMatch = errors.New("新证书没有任何域名，而该工作流的上传节点开启了「从本地获取符合条件的证书」，请先关闭该选项或更换证书")
+// errDomainsUnusableForLocalMatch 表示新证书的域名无法作为本地匹配条件，但有开启本地匹配的上传节点引用它。
+var errDomainsUnusableForLocalMatch = errors.New("新证书没有可用于本地匹配的域名（为空或包含逗号），而该工作流的上传节点开启了「从本地获取符合条件的证书」，请先关闭该选项或更换证书")
 
-// hasLocalMatchRef 判断执行树中是否有引用该证书且开启 use_local_cert 的上传节点（与执行器 upload() 的判断一致）。
-func hasLocalMatchRef(node *ExecNode, isRef func(string) bool) bool {
-	if node == nil {
-		return false
+// hexCharEscapeRe 匹配能写出十六进制字符（0-9、A-F、a-f）的 JSON \u 转义。
+var hexCharEscapeRe = regexp.MustCompile(`\\u00(3[0-9]|4[1-6]|6[1-6])`)
+
+// errNotExecutable 表示内容无法按执行器的方式解码（执行器同样无法运行该工作流）。
+var errNotExecutable = errors.New("工作流内容无法解析")
+
+// replaceInJSONValue 把解码后 JSON 值里所有字符串（含对象键）中的 old 替换为 new，返回新值与是否有替换。
+// 替换后对象键冲突（如同时有以旧、新 sha256 为键的两项）会丢数据，返回 errUnsafeRewrite。
+func replaceInJSONValue(v any, old, new string) (any, bool, error) {
+	switch val := v.(type) {
+	case string:
+		if strings.Contains(val, old) {
+			return strings.ReplaceAll(val, old, new), true, nil
+		}
+		return val, false, nil
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		changed := false
+		for k, item := range val {
+			nk := k
+			if strings.Contains(k, old) {
+				nk, changed = strings.ReplaceAll(k, old, new), true
+			}
+			if _, dup := out[nk]; dup {
+				return v, false, errUnsafeRewrite
+			}
+			nv, c, err := replaceInJSONValue(item, old, new)
+			if err != nil {
+				return v, false, err
+			}
+			changed = changed || c
+			out[nk] = nv
+		}
+		return out, changed, nil
+	case []any:
+		out := make([]any, len(val))
+		changed := false
+		for i, item := range val {
+			nv, c, err := replaceInJSONValue(item, old, new)
+			if err != nil {
+				return v, false, err
+			}
+			out[i] = nv
+			changed = changed || c
+		}
+		return out, changed, nil
 	}
-	if node.Type == "upload" && node.Config != nil {
-		if useLocal, _ := node.Config["use_local_cert"].(bool); useLocal {
-			if id, ok := execCertID(node.Config["cert_id"]); ok && isRef(id) {
-				return true
+	return v, false, nil
+}
+
+// replaceShaInExecTree 在执行树的所有字符串字段上做同样的替换，用于构造校验用的预期结果。
+func replaceShaInExecTree(node *ExecNode, old, new string) (bool, error) {
+	if node == nil {
+		return false, nil
+	}
+	changed := false
+	for _, f := range []*string{&node.Id, &node.Type, &node.Name} {
+		if strings.Contains(*f, old) {
+			*f, changed = strings.ReplaceAll(*f, old, new), true
+		}
+	}
+	for i := range node.Inputs {
+		for _, f := range []*string{&node.Inputs[i].Name, &node.Inputs[i].FromNodeID} {
+			if strings.Contains(*f, old) {
+				*f, changed = strings.ReplaceAll(*f, old, new), true
 			}
 		}
 	}
-	if hasLocalMatchRef(node.ChildNode, isRef) {
-		return true
-	}
-	for _, b := range node.ConditionNodes {
-		if hasLocalMatchRef(b, isRef) {
-			return true
+	if node.Config != nil {
+		cfg, c, err := replaceInJSONValue(node.Config, old, new)
+		if err != nil {
+			return false, err
+		}
+		if c {
+			node.Config, changed = cfg.(map[string]any), true
 		}
 	}
-	return false
+	c, err := replaceShaInExecTree(node.ChildNode, old, new)
+	if err != nil {
+		return false, err
+	}
+	changed = changed || c
+	for _, b := range node.ConditionNodes {
+		c, err := replaceShaInExecTree(b, old, new)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || c
+	}
+	return changed, nil
 }
 
 // decodeExecTree 按执行器的方式解码工作流；失败时执行器同样无法运行该工作流。
@@ -540,56 +653,107 @@ func decodeExecTree(content string) (*ExecNode, error) {
 	return &node, nil
 }
 
-// patchExecTree 把执行树中引用该证书、域名不同的上传节点的 domains 改为 newDomains，返回是否有改动。
-// 遍历 childNode 与全部 conditionNodes（执行器只会走其中一部分，多同步的节点不影响执行）。
-func patchExecTree(node *ExecNode, isRef func(string) bool, newDomains string) bool {
+// planUploadNode 按执行器 upload() 的语义判断一个上传节点的 config 需要怎样修改：
+//   - cert_id 仍是旧 sha256（文本替换没覆盖到，如 JSON 转义写法）：改为新 sha256，否则引用会失效；
+//   - 引用被编辑的证书：domains 改为新证书域名；新域名不能用于本地匹配时，开启 use_local_cert 的节点报错。
+//
+// apply 为 true 时直接修改 cfg。返回是否需要修改。
+func planUploadNode(cfg map[string]any, ch certChange, apply bool) (bool, error) {
+	id, ok := execCertID(cfg["cert_id"])
+	if !ok {
+		return false, nil
+	}
+	changed := false
+	ref := false
+	if ch.oldSha != "" && ch.oldSha != ch.newSha && id == ch.oldSha {
+		if apply {
+			cfg["cert_id"] = ch.newSha
+		}
+		changed, ref = true, true
+	} else {
+		ref = ch.isRef(id)
+	}
+	if !ref {
+		return changed, nil
+	}
+	if !ch.usable {
+		if useLocal, _ := cfg["use_local_cert"].(bool); useLocal {
+			return false, errDomainsUnusableForLocalMatch
+		}
+		// 未开启本地匹配：清空旧证书的域名，避免以后开启时沿用过期的匹配条件（前端会因缺少域名拦截开启）
+		if cur, _ := cfg["domains"].(string); cur != "" {
+			if apply {
+				cfg["domains"] = ""
+			}
+			changed = true
+		}
+		return changed, nil
+	}
+	if cur, _ := cfg["domains"].(string); !sameDomainSet(cur, ch.domains) {
+		if apply {
+			cfg["domains"] = ch.domains
+		}
+		changed = true
+	}
+	return changed, nil
+}
+
+// patchExecTree 在执行树上应用 planUploadNode。遍历 childNode 与全部 conditionNodes
+// （执行器只会走其中一部分，多处理的节点不影响执行）。
+func patchExecTree(node *ExecNode, ch certChange) (bool, error) {
 	if node == nil {
-		return false
+		return false, nil
 	}
 	changed := false
 	if node.Type == "upload" && node.Config != nil {
-		if id, ok := execCertID(node.Config["cert_id"]); ok && isRef(id) {
-			if cur, _ := node.Config["domains"].(string); !sameDomainSet(cur, newDomains) {
-				node.Config["domains"] = newDomains
-				changed = true
-			}
+		c, err := planUploadNode(node.Config, ch, true)
+		if err != nil {
+			return false, err
 		}
+		changed = c
 	}
-	if patchExecTree(node.ChildNode, isRef, newDomains) {
-		changed = true
+	c, err := patchExecTree(node.ChildNode, ch)
+	if err != nil {
+		return false, err
 	}
+	changed = changed || c
 	for _, b := range node.ConditionNodes {
-		if patchExecTree(b, isRef, newDomains) {
-			changed = true
+		c, err := patchExecTree(b, ch)
+		if err != nil {
+			return false, err
 		}
+		changed = changed || c
 	}
-	return changed
+	return changed, nil
 }
 
-// syncUploadNodeDomains 把工作流中引用该证书的上传节点的 domains 更新为 newDomains。
+// syncUploadNodes 让工作流中的上传节点跟上证书编辑（见 planUploadNode）。
 // 上传节点的 domains 由前端在选择证书时自动填入，开启 use_local_cert 后证书临期时按它查找替代证书；
 // 手动证书被编辑后若不同步，会按旧域名匹配。
 //
-// 是否需要同步、改哪些节点，都按执行器的解码方式（ExecNode）判断；实际改写在保留原字段的 JSON 上进行，
-// 写回前再按执行器方式解码校验：结果必须与「原执行树仅改动这些 domains」完全一致，否则返回 errUnsafeRewrite。
+// 需要改哪些节点按执行器的解码方式（ExecNode）判断；实际改写在保留原字段的 JSON 上进行，写回前再按
+// 执行器方式解码校验：结果必须与预期的执行树完全一致，否则返回 errUnsafeRewrite，由调用方回滚。
 // content 本身不是合法工作流时执行器无法运行，原样返回。
-func syncUploadNodeDomains(content string, isRef func(string) bool, newDomains string) (string, bool, error) {
-	if content == "" {
-		return content, false, nil
-	}
+func syncUploadNodes(content string, ch certChange) (string, bool, error) {
 	expected, err := decodeExecTree(content)
 	if err != nil {
-		return content, false, nil
+		return content, false, errNotExecutable
 	}
-	// 新证书没有任何域名：开启本地匹配的引用节点既不能留旧域名也不能写空值（执行时会报错），拒绝；
-	// 其余节点运行时不用 domains，保持不变。
-	if newDomains == "" {
-		if hasLocalMatchRef(expected, isRef) {
-			return content, false, errDomainlessLocalMatch
+	// 原文既不含旧 sha256、也没有能写出十六进制字符的 \u 转义时，解码后的字符串不可能含旧 sha256，
+	// 无需替换；这样与本证书无关的工作流在写锁内只解码一次。
+	replaceSha := ch.oldSha != "" && ch.oldSha != ch.newSha &&
+		(strings.Contains(content, ch.oldSha) || hexCharEscapeRe.MatchString(content))
+	changed := false
+	if replaceSha {
+		if changed, err = replaceShaInExecTree(expected, ch.oldSha, ch.newSha); err != nil {
+			return content, false, err
 		}
-		return content, false, nil
 	}
-	if !patchExecTree(expected, isRef, newDomains) {
+	patched, err := patchExecTree(expected, ch)
+	if err != nil {
+		return content, false, err
+	}
+	if !replaceSha && !patched {
 		return content, false, nil
 	}
 
@@ -597,9 +761,33 @@ func syncUploadNodeDomains(content string, isRef func(string) bool, newDomains s
 	dec.UseNumber() // 保持数字原样，避免大整数被转成科学计数法
 	var root any
 	if err := dec.Decode(&root); err != nil {
-		return content, false, errUnsafeRewrite
+		return content, false, errNotExecutable
 	}
-	// 沿 childNode / conditionNodes（字段名不区分大小写，与 encoding/json 一致）找到上传节点并改写 domains；
+	if replaceSha {
+		var c bool
+		if root, c, err = replaceInJSONValue(root, ch.oldSha, ch.newSha); err != nil {
+			return content, false, err
+		}
+		changed = changed || c
+	}
+	if !changed && !patched {
+		return content, false, nil
+	}
+	// 只需替换 sha256 时优先沿用原来的原文替换（保留键顺序与格式）；仅当它与逐字符串替换等价时采用，
+	// 否则（如旧 sha 与 \u 转义序列重叠）走下面的重新编码路径。
+	if !patched {
+		raw := strings.ReplaceAll(content, ch.oldSha, ch.newSha)
+		rawDec := json.NewDecoder(strings.NewReader(raw))
+		rawDec.UseNumber()
+		var rawRoot any
+		if rawDec.Decode(&rawRoot) == nil && reflect.DeepEqual(rawRoot, root) {
+			if actual, err := decodeExecTree(raw); err == nil && reflect.DeepEqual(expected, actual) {
+				return raw, raw != content, nil
+			}
+		}
+	}
+
+	// 沿 childNode / conditionNodes（字段名不区分大小写，与 encoding/json 一致）找到上传节点并改写；
 	// 不进入 config，避免改到插件业务数据。
 	var walk func(v any)
 	walk = func(v any) {
@@ -630,18 +818,17 @@ func syncUploadNodeDomains(content string, isRef func(string) bool, newDomains s
 		}
 		if isUpload {
 			for _, cfg := range configs {
-				if id, ok := execCertID(cfg["cert_id"]); ok && isRef(id) {
-					if cur, _ := cfg["domains"].(string); !sameDomainSet(cur, newDomains) {
-						cfg["domains"] = newDomains
-					}
-				}
+				planUploadNode(cfg, ch, true)
 			}
 		}
 		for _, n := range next {
 			walk(n)
 		}
 	}
-	walk(root)
+	// 只有执行树确实需要修改上传节点时才改写；仅替换 sha256 时不动节点，避免误改被执行器视为其他类型的节点
+	if patched {
+		walk(root)
+	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -650,7 +837,7 @@ func syncUploadNodeDomains(content string, isRef func(string) bool, newDomains s
 	}
 	out := strings.TrimSuffix(buf.String(), "\n")
 
-	// 校验：执行器看到的新工作流必须正好等于预期（只改了相关节点的 domains）
+	// 校验：执行器看到的新工作流必须正好等于预期
 	actual, err := decodeExecTree(out)
 	if err != nil || !reflect.DeepEqual(expected, actual) {
 		return content, false, errUnsafeRewrite

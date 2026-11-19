@@ -34,6 +34,11 @@ func refs(ids ...string) func(string) bool {
 	}
 }
 
+// syncDomains 以「只改域名」的证书变更调用 syncUploadNodes
+func syncDomains(content string, isRef func(string) bool, domains string) (string, bool, error) {
+	return syncUploadNodes(content, certChange{domains: domains, usable: domains != "", isRef: isRef})
+}
+
 // 工作流：start -> upload(sha 引用) -> branch[ upload(数字 id 引用), upload(其他证书) ]
 const syncWorkflow = `{"id":"start","type":"start","name":"开始","config":{"exec_type":"auto","big":12345678901234567890},"childNode":{"id":"u1","type":"upload","name":"上传","config":{"cert_id":"newsha256","domains":"a.com","use_local_cert":true,"end_day":30},"childNode":{"id":"b","type":"branch","conditionNodes":[{"id":"c1","type":"condition","childNode":{"id":"u2","type":"upload","config":{"cert_id":7,"domains":"a.com","use_local_cert":true,"end_day":30}}},{"id":"c2","type":"condition","childNode":{"id":"u3","type":"upload","config":{"cert_id":"othersha","domains":"x.com"}}}]}}}`
 
@@ -95,7 +100,7 @@ func execDomains(t *testing.T, content, id string) string {
 }
 
 func TestSyncUploadNodeDomains(t *testing.T) {
-	out, changed, err := syncUploadNodeDomains(syncWorkflow, refs(newSha, "7"), "a.com,b.com")
+	out, changed, err := syncDomains(syncWorkflow, refs(newSha, "7"), "a.com,b.com")
 	if err != nil || !changed {
 		t.Fatalf("expected change, got changed=%v err=%v", changed, err)
 	}
@@ -114,33 +119,38 @@ func TestSyncUploadNodeDomains(t *testing.T) {
 }
 
 func TestSyncUploadNodeDomainsNoChange(t *testing.T) {
-	out, changed, err := syncUploadNodeDomains(syncWorkflow, refs(newSha, "7"), "a.com")
+	out, changed, err := syncDomains(syncWorkflow, refs(newSha, "7"), "a.com")
 	if err != nil || changed || out != syncWorkflow {
 		t.Fatalf("expected untouched content, changed=%v err=%v", changed, err)
 	}
-	out, changed, err = syncUploadNodeDomains(syncWorkflow, refs("nomatch"), "z.com")
+	out, changed, err = syncDomains(syncWorkflow, refs("nomatch"), "z.com")
 	if err != nil || changed || out != syncWorkflow {
 		t.Fatalf("expected untouched content for unrelated cert, changed=%v err=%v", changed, err)
 	}
-	// 执行器无法解码的内容（含末尾多余数据）原样返回
+	// 执行器无法解码的内容（含末尾多余数据）：不处理节点，rewriteWorkflowContent 退回原来的纯文本替换
 	for _, bad := range []string{"not json", syncWorkflow + ` {"x":1}`} {
-		if out, changed, err := syncUploadNodeDomains(bad, refs(newSha), "a.com,b.com"); err != nil || changed || out != bad {
-			t.Fatalf("undecodable content must be left alone, changed=%v err=%v", changed, err)
+		if out, changed, err := syncDomains(bad, refs(newSha), "a.com,b.com"); !errors.Is(err, errNotExecutable) || changed || out != bad {
+			t.Fatalf("undecodable content must be reported as not executable, changed=%v err=%v", changed, err)
+		}
+		ch := certChange{oldSha: "oldsha", newSha: newSha, domains: "a.com", usable: true, isRef: refs(newSha)}
+		if out, err := rewriteWorkflowContent(bad+" oldsha", ch); err != nil || out != bad+" "+newSha {
+			t.Fatalf("undecodable content should fall back to text replacement: %q err=%v", out, err)
 		}
 	}
 	// 新证书没有任何域名：有开启本地匹配的引用节点时拒绝，否则保持不变
-	if out, changed, err := syncUploadNodeDomains(syncWorkflow, refs(newSha, "7"), ""); !errors.Is(err, errDomainlessLocalMatch) || changed || out != syncWorkflow {
+	if out, changed, err := syncDomains(syncWorkflow, refs(newSha, "7"), ""); !errors.Is(err, errDomainsUnusableForLocalMatch) || changed || out != syncWorkflow {
 		t.Fatalf("domainless cert used by local matching must be rejected, changed=%v err=%v", changed, err)
 	}
+	// 未开启本地匹配：允许，并清空旧域名，避免以后开启时沿用
 	noLocal := `{"id":"u","type":"upload","config":{"cert_id":"newsha256","domains":"a.com","use_local_cert":false}}`
-	if out, changed, err := syncUploadNodeDomains(noLocal, refs(newSha), ""); err != nil || changed || out != noLocal {
-		t.Fatalf("domainless cert without local matching should be allowed unchanged, changed=%v err=%v", changed, err)
+	if out, changed, err := syncDomains(noLocal, refs(newSha), ""); err != nil || !changed || execDomains(t, out, "u") != "" {
+		t.Fatalf("domainless cert without local matching should clear stale domains, changed=%v err=%v out=%s", changed, err, out)
 	}
 }
 
 func TestSyncUploadNodeDomainsOrderOnly(t *testing.T) {
 	wf := `{"id":"u","type":"upload","config":{"cert_id":"newsha256","domains":"b.com,a.com"}}`
-	out, changed, err := syncUploadNodeDomains(wf, refs(newSha), "a.com,b.com")
+	out, changed, err := syncDomains(wf, refs(newSha), "a.com,b.com")
 	if err != nil || changed || out != wf {
 		t.Fatalf("same domain set in different order should not rewrite, changed=%v err=%v", changed, err)
 	}
@@ -149,7 +159,7 @@ func TestSyncUploadNodeDomainsOrderOnly(t *testing.T) {
 func TestSyncUploadNodeDomainsCaseChange(t *testing.T) {
 	// 运行时按原字符串精确匹配，只改大小写也必须同步。
 	wf := `{"id":"u","type":"upload","config":{"cert_id":"newsha256","domains":"A.com"}}`
-	out, changed, err := syncUploadNodeDomains(wf, refs(newSha), "a.com")
+	out, changed, err := syncDomains(wf, refs(newSha), "a.com")
 	if err != nil || !changed || execDomains(t, out, "u") != "a.com" {
 		t.Fatalf("case change should rewrite, changed=%v err=%v out=%s", changed, err, out)
 	}
@@ -158,7 +168,7 @@ func TestSyncUploadNodeDomainsCaseChange(t *testing.T) {
 func TestSyncUploadNodeDomainsNumericID(t *testing.T) {
 	// 执行器把数字 cert_id 转成 strconv.Itoa(int(v))，7.0 也是 "7"
 	wf := `{"id":"u","type":"upload","config":{"cert_id":7.0,"domains":"a.com"}}`
-	out, changed, err := syncUploadNodeDomains(wf, refs("7"), "a.com,b.com")
+	out, changed, err := syncDomains(wf, refs("7"), "a.com,b.com")
 	if err != nil || !changed || execDomains(t, out, "u") != "a.com,b.com" {
 		t.Fatalf("numeric id should match, changed=%v err=%v", changed, err)
 	}
@@ -167,7 +177,7 @@ func TestSyncUploadNodeDomainsNumericID(t *testing.T) {
 func TestSyncUploadNodeDomainsSkipsPluginConfig(t *testing.T) {
 	// 插件节点 config 里恰好有形似上传节点的数据，不是可执行节点，不能改。
 	wf := `{"id":"p","type":"plugin.demo","config":{"payload":{"id":"fake","type":"upload","config":{"cert_id":"newsha256","domains":"a.com"}}}}`
-	out, changed, err := syncUploadNodeDomains(wf, refs(newSha), "a.com,b.com")
+	out, changed, err := syncDomains(wf, refs(newSha), "a.com,b.com")
 	if err != nil || changed || out != wf {
 		t.Fatalf("plugin config must not be rewritten, changed=%v err=%v out=%s", changed, err, out)
 	}
@@ -176,7 +186,7 @@ func TestSyncUploadNodeDomainsSkipsPluginConfig(t *testing.T) {
 func TestSyncUploadNodeDomainsCaseInsensitiveKeys(t *testing.T) {
 	// encoding/json 解码 WorkflowNode 时字段名不区分大小写，执行器会把它当上传节点执行
 	wf := `{"id":"s","type":"start","ChildNode":{"Id":"u","Type":"upload","Config":{"cert_id":"007","domains":"a.com"}}}`
-	out, changed, err := syncUploadNodeDomains(wf, refs(newSha, "007"), "a.com,b.com")
+	out, changed, err := syncDomains(wf, refs(newSha, "007"), "a.com,b.com")
 	if err != nil || !changed || execDomains(t, out, "u") != "a.com,b.com" {
 		t.Fatalf("expected change, changed=%v err=%v out=%s", changed, err, out)
 	}
@@ -193,14 +203,14 @@ func TestSyncUploadNodeDomainsRejectsUnsafeRewrites(t *testing.T) {
 		// 大小写不同的 id：执行器取最后的 live，重写后会变成 old
 		"大小写重复的 id": `{"id":"old","Id":"live","type":"upload","config":{"cert_id":"7","domains":"a.com"}}`,
 	} {
-		out, changed, err := syncUploadNodeDomains(wf, refs("7"), "a.com,b.com")
+		out, changed, err := syncDomains(wf, refs("7"), "a.com,b.com")
 		if !errors.Is(err, errUnsafeRewrite) || changed || out != wf {
 			t.Errorf("%s: expected errUnsafeRewrite, changed=%v err=%v out=%s", name, changed, err, out)
 		}
 	}
 	// 有歧义但与该证书无关、不需要改动时不报错
 	wf := `{"id":"s","type":"start","childNode":{"id":"u","type":"plugin.demo","Type":"upload","config":{"cert_id":"7","domains":"a.com"}}}`
-	if _, changed, err := syncUploadNodeDomains(wf, refs("other"), "a.com,b.com"); err != nil || changed {
+	if _, changed, err := syncDomains(wf, refs("other"), "a.com,b.com"); err != nil || changed {
 		t.Fatalf("unrelated workflow should be left alone, changed=%v err=%v", changed, err)
 	}
 }
@@ -246,6 +256,112 @@ func TestCertRefMatcherUsesSQLiteSemantics(t *testing.T) {
 	broken := newCertRefMatcher(ctx, conn, 7, "abc")
 	if broken.match("7") || broken.err == nil {
 		t.Fatal("lookup errors must be recorded, not treated as a non-match")
+	}
+}
+
+func TestRewriteWorkflowContentEscapedOldSha(t *testing.T) {
+	// cert_id 用 JSON 转义写旧 sha（\u0064 = d）：执行器解码后指向旧 sha，文本替换匹配不到
+	wf := `{"id":"u","type":"upload","config":{"cert_id":"\u0064old","domains":"a.com","use_local_cert":true,"end_day":30}}`
+	ch := certChange{oldSha: "dold", newSha: newSha, domains: "a.com,b.com", usable: true, isRef: refs(newSha)}
+	out, err := rewriteWorkflowContent(wf, ch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := decodeExecTree(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.Config["cert_id"] != newSha || root.Config["domains"] != "a.com,b.com" {
+		t.Fatalf("escaped old sha not migrated: %v", root.Config)
+	}
+
+	// 旧 sha 以数字开头且该数字被转义（\u0031），新 sha 以字母开头：原文替换会把 \u0031 改成 \u003a（":"）
+	wf2 := `{"id":"u","type":"upload","config":{"cert_id":"\u00311abc","domains":"a.com","use_local_cert":true,"end_day":30}}`
+	ch2 := certChange{oldSha: "11abc", newSha: "adef", domains: "a.com", usable: true, isRef: refs("adef")}
+	out2, err := rewriteWorkflowContent(wf2, ch2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root2, err := decodeExecTree(out2); err != nil || root2.Config["cert_id"] != "adef" {
+		t.Fatalf("escaped digit-leading sha not migrated correctly: %s (%v)", out2, err)
+	}
+}
+
+func TestRewriteWorkflowContentReplacesShaEverywhere(t *testing.T) {
+	// 与原来的全文替换一致：sha 出现在其他节点、键名里也一起替换
+	wf := `{"id":"s","type":"start","config":{"note":"uses oldsha","map":{"oldsha":1}},"childNode":{"id":"u","type":"upload","config":{"cert_id":"oldsha","domains":"a.com"}}}`
+	ch := certChange{oldSha: "oldsha", newSha: newSha, domains: "a.com", usable: true, isRef: refs(newSha)}
+	out, err := rewriteWorkflowContent(wf, ch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "oldsha") || !strings.Contains(out, `"note":"uses newsha256"`) || !strings.Contains(out, `"newsha256":1`) {
+		t.Fatalf("sha not replaced everywhere: %s", out)
+	}
+}
+
+func TestRewriteWorkflowContentShaOnlyLeavesNodesAlone(t *testing.T) {
+	// 执行器把节点当插件（最后的 type 生效），只需替换 sha：不能因为前面的 "Type":"upload" 去改它的 domains
+	wf := `{"id":"p","Type":"upload","type":"plugin.demo","config":{"cert_id":"oldsha","domains":"a.com"}}`
+	ch := certChange{oldSha: "oldsha", newSha: newSha, domains: "a.com,b.com", usable: true, isRef: refs(newSha)}
+	out, err := rewriteWorkflowContent(wf, ch)
+	if err != nil {
+		t.Fatalf("sha-only rewrite should succeed: %v", err)
+	}
+	root, err := decodeExecTree(out)
+	if err != nil || root.Type != "plugin.demo" || root.Config["cert_id"] != newSha || root.Config["domains"] != "a.com" {
+		t.Fatalf("unexpected result: %s (%v)", out, err)
+	}
+}
+
+func TestRewriteWorkflowContentShaOnlyKeepsKeyOrder(t *testing.T) {
+	// "type":"plugin.demo" 在前、"Type":"upload" 在后：执行器按上传节点执行。只换 sha（域名不变）时
+	// 原文替换保留键顺序，不能因为重新编码排序键而被拒绝。
+	wf := `{"id":"u","type":"plugin.demo","Type":"upload","config":{"cert_id":"oldsha","domains":"a.com"}}`
+	ch := certChange{oldSha: "oldsha", newSha: newSha, domains: "a.com", usable: true, isRef: refs(newSha)}
+	out, err := rewriteWorkflowContent(wf, ch)
+	if err != nil {
+		t.Fatalf("sha-only renewal should succeed: %v", err)
+	}
+	if out != strings.ReplaceAll(wf, "oldsha", newSha) {
+		t.Fatalf("expected in-place text replacement, got %s", out)
+	}
+}
+
+func TestHexCharEscapeRe(t *testing.T) {
+	for _, v := range []string{`\u0030`, `\u0039`, `\u0041`, `\u0046`, `\u0061`, `\u0066`, `x\u0064old`} {
+		if !hexCharEscapeRe.MatchString(v) {
+			t.Errorf("%s should match", v)
+		}
+	}
+	for _, v := range []string{`\u0026`, `\u003a`, `\u0047`, `\u0067`, `\u4e2d`, `plain`} {
+		if hexCharEscapeRe.MatchString(v) {
+			t.Errorf("%s should not match", v)
+		}
+	}
+}
+
+func TestRewriteWorkflowContentRejectsKeyCollision(t *testing.T) {
+	// 同一对象里同时有以旧、新 sha 为键的两项：替换后会合并丢数据，必须拒绝
+	wf := `{"id":"s","type":"start","config":{"oldsha":1,"newsha256":2},"childNode":{"id":"u","type":"upload","config":{"cert_id":"oldsha","domains":"a.com"}}}`
+	ch := certChange{oldSha: "oldsha", newSha: newSha, domains: "a.com", usable: true, isRef: refs(newSha)}
+	if out, err := rewriteWorkflowContent(wf, ch); !errors.Is(err, errUnsafeRewrite) || out != wf {
+		t.Fatalf("key collision must be rejected, err=%v out=%s", err, out)
+	}
+}
+
+func TestNewCertChangeCommaInIdentifier(t *testing.T) {
+	// CN 本身是 "a.invalid,b.invalid"：逗号连接存储会被误拆成两个域名，不能作为本地匹配条件
+	ch := newCertChange("old", newSha, []string{"a.invalid,b.invalid", "a.invalid"}, refs("7"))
+	if ch.usable {
+		t.Fatal("identifiers containing commas must not be usable for local matching")
+	}
+	wf := `{"id":"u","type":"upload","config":{"cert_id":7,"domains":"a.invalid,b.invalid","use_local_cert":true,"end_day":30}}`
+	if _, changed, err := syncUploadNodes(wf, ch); !errors.Is(err, errDomainsUnusableForLocalMatch) || changed {
+		t.Fatalf("expected errDomainsUnusableForLocalMatch, changed=%v err=%v", changed, err)
+	}
+	if ok := newCertChange("old", newSha, []string{"a.invalid", "b.invalid"}, refs("7")); !ok.usable || ok.domains != "a.invalid,b.invalid" {
+		t.Fatalf("normal identifiers should be usable: %+v", ok)
 	}
 }
 
@@ -372,6 +488,33 @@ func TestUpdateCertSyncsWorkflowsAtomically(t *testing.T) {
 	}
 	if _, ws2b := snapshot(); ws2b[1] != ws[1] || ws2b[2] != ws[2] {
 		t.Fatal("unrelated workflows must not change")
+	}
+
+	// 3b. CN 带逗号的证书：引用它的节点开启了本地匹配，拒绝且不做任何修改
+	certComma := makeTestCert(t, key, 5, "a.invalid,b.invalid", []string{"a.invalid"})
+	if _, _, _, err := UpdateCert("7", certComma, keyPEM, true); err == nil {
+		t.Fatal("certificate with a comma in an identifier must be rejected when local matching uses it")
+	}
+	if certRow3b, ws3b := snapshot(); certRow3b != certRow || ws3b[1] != ws[1] || ws3b[2] != ws[2] {
+		t.Fatal("rejected comma update must not change anything")
+	}
+
+	// 3c. 上传与编辑规则一致：标识带逗号的证书上传同样被拒绝
+	if _, err := UploadCert(keyPEM, makeTestCert(t, key, 10, "x.invalid,y.invalid", []string{"x.invalid"})); err == nil {
+		t.Fatal("uploading a certificate with a comma in an identifier must be rejected")
+	}
+	var n10 int
+	if err := db.QueryRow(`SELECT count(*) FROM cert WHERE domains LIKE '%y.invalid%'`).Scan(&n10); err != nil || n10 != 0 {
+		t.Fatalf("rejected upload must not be stored: %d %v", n10, err)
+	}
+	// 规则上线前已入库的同一张证书重新上传，也不能走去重分支绕过校验
+	legacy := makeTestCert(t, key, 12, "p.invalid,q.invalid", []string{"p.invalid"})
+	legacySha, _ := public.GetSHA256(legacy)
+	if _, err = db.Exec(`INSERT INTO cert (id,sha256,cert,key,domains,source) VALUES (12,?,?,?,'p.invalid,q.invalid,p.invalid','upload')`, legacySha, legacy, keyPEM); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UploadCert(keyPEM, legacy); err == nil {
+		t.Fatal("re-uploading a legacy comma-identifier certificate must be rejected")
 	}
 
 	// 4. 只有空 DNS SAN 的证书同样视为没有域名
