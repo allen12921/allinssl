@@ -22,7 +22,6 @@ export const useCertManageStore = defineStore('cert-manage-store', () => {
 	// -------------------- 状态定义 --------------------
 	// 上传证书表单
 	const uploadForm = ref<UploadCertParams>({
-		cert_id: '',
 		cert: '',
 		key: '',
 	})

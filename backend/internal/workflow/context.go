@@ -1,14 +1,18 @@
 package workflow
 
-import "ALLinSSL/backend/public"
+import (
+	"ALLinSSL/backend/public"
+	"context"
+)
 
 func NewExecutionContext(RunID string) *ExecutionContext {
 	Logger, _ := public.NewLogger(public.GetSettingIgnoreError("workflow_log_path") + RunID + ".log")
 	return &ExecutionContext{
-		Data:   make(map[string]any),
-		Status: make(map[string]ExecutionStatus),
-		RunID:  RunID,
-		Logger: Logger,
+		Context: context.Background(),
+		Data:    make(map[string]any),
+		Status:  make(map[string]ExecutionStatus),
+		RunID:   RunID,
+		Logger:  Logger,
 	}
 }
 
@@ -30,4 +34,19 @@ func (ctx *ExecutionContext) GetStatus(nodeID string) ExecutionStatus {
 	ctx.mu.RLock()
 	defer ctx.mu.RUnlock()
 	return ctx.Status[nodeID]
+}
+
+// GetWorkflowStatus 汇总整体执行结果和节点状态，整体失败优先。
+func (ctx *ExecutionContext) GetWorkflowStatus(err error) string {
+	if err != nil {
+		return "fail"
+	}
+	ctx.mu.RLock()
+	defer ctx.mu.RUnlock()
+	for _, status := range ctx.Status {
+		if status == StatusFailed {
+			return "partial"
+		}
+	}
+	return "success"
 }

@@ -11,3 +11,5 @@ plugins/upyun/upyun
 *.exe
 *.syso
 plans/
+/plugins
+/docs

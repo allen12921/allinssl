@@ -1,0 +1,510 @@
+# All in SSL - SSL证书全流程管理工具 🔒
+
+[![GitHub License](https://img.shields.io/github/license/allinssl/allinssl)](https://github.com/allinssl/allinssl?tab=readme-ov-file#AGPL-3.0-1-ov-file)
+![GitHub Stars](https://img.shields.io/github/stars/allinssl/allinssl?style=social)
+[![GitHub Issues](https://img.shields.io/github/issues/allinssl/allinssl)](https://github.com/allinssl/allinssl/issues)
+[![GitHub Release](https://img.shields.io/github/v/release/allinssl/allinssl)](https://github.com/allinssl/allinssl/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/allinssl/allinssl)](https://hub.docker.com/r/allinssl/allinssl)
+
+
+> 🚀 一站式SSL证书生命周期管理解决方案 | 支持Let's Encrypt、ZeroSSL、Google、SSL.COM、BuyPass等多家CA | 多平台部署 | 自动化运维
+
+<p align="center">
+  <img src=".github/img/main.gif" alt="控制台预览" width="600">
+</p>
+
+## 🔀 关于本 Fork
+
+本仓库 fork 自 [allinssl/allinssl](https://github.com/allinssl/allinssl)，在上游基础上新增了以下功能：
+
+| 功能 | 说明 |
+|------|------|
+| **API Key 访问** | 支持通过 HMAC 签名方式无需 Session 直接调用证书接口，适合脚本自动化 |
+| **AWS CloudFront 部署** | 新增 AWS CloudFront 主机提供商，通过 IAM 证书完成 CloudFront 分发部署 |
+| **又拍云 SSL 部署** | 新增又拍云 SSL 证书部署插件 |
+| **多域名批量部署** | 阿里云 CDN/DCDN、七牛云 CDN/OSS 支持一次填写多个域名批量部署 |
+| **ARI 协议兼容** | 兼容 ACME Renewal Information (ARI) 协议，支持 CA 推荐的最佳续期时间窗口 |
+| **手动证书编辑** | 手动上传的证书支持编辑更新，更新后可自动触发关联工作流 |
+| **工作流关联状态** | 证书管理页面直接展示工作流关联状态，删除证书时给出影响提示 |
+| **证书链完整性校验** | 证书上传/编辑时自动校验证书链完整性及域名覆盖一致性 |
+
+## 📌 项目亮点
+- ✅ 全自动证书申请/续期
+- 🌐 多平台部署（CDN/WAF/面板/云存储）
+- 🔔 证书过期监控
+- 🛡️ 安全入口保护
+- 📊 可视化证书管理
+
+## 🚧 开发路线图
+
+我们正在积极完善以下功能，欢迎通过 [GitHub Issues](https://github.com/allinssl/allinssl/issues) 提出建议！
+
+[![GitHub Milestone](https://img.shields.io/github/milestones/progress/allinssl/allinssl/1)](https://github.com/allinssl/allinssl/milestone/1)
+
+
+## 🚀 快速开始
+
+### 系统要求
+- Linux 系统
+- macOS/Windows（请参照下面教程，暂不支持脚本安装）
+- Docker
+
+### 极速安装
+```bash
+curl -sSO http://allinssl.bt.cn/install_allinssl.sh && bash install_allinssl.sh allinssl
+```
+
+### 极速安装（备用）
+```bash
+curl -sSO http://download.allinssl.com/install_allinssl.sh && bash install_allinssl.sh allinssl
+```
+
+### Docker安装
+```bash 
+docker run -itd \
+  --name allinssl \
+  -p 8888:8888 \
+  -v /www/allinssl/data:/www/allinssl/data \
+  -e ALLINSSL_USER=allinssl \
+  -e ALLINSSL_PWD=allinssldocker \
+  -e ALLINSSL_URL=allinssl \
+  -e TZ=Asia/Shanghai \
+  allinssl/allinssl:latest
+```
+
+### 二进制文件安装
+1. 打开 [releases 下载页面](https://github.com/allinssl/allinssl/releases)
+2. 下载最新版本的二进制文件
+3. 解压缩文件，并通过终端或者CMD进入解压目录
+4. 获取登陆地址，账号和密码
+   - 账号和登陆地址：
+    - Linux: `./allinssl 15`
+    - Windows: `.\allinssl 15`
+  - 密码：
+    - Linux: `./allinssl 6`
+    - Windows: `.\allinssl 6`
+5. 运行可执行文件启动服务，请保持终端打开，或者自行配置进程守护
+   - Linux: 执行 `./allinssl start`
+   - Windows: 终端进入到解压目录，执行 `.\allinssl start`
+6. 访问 `http://your-server-ip:port/安全入口`，使用账号和密码登录
+7. 更多命令行操作请参考 [命令行操作](#💻-命令行操作)
+
+### 源码编译安装
+如需自行编译，请确保已安装 Go 1.23+ 和 Node.js 18+ 环境：
+
+#### 1. 克隆仓库
+```bash
+git clone https://github.com/allinssl/allinssl.git
+cd allinssl
+```
+
+#### 2. 构建前端资源
+```bash
+cd frontend
+npm install -g pnpm   # 如未安装 pnpm
+pnpm install
+pnpm run build
+cd ..
+```
+
+> 构建完成后，将 `frontend/apps/allin-ssl/dist/` 下的内容复制到项目根目录的 `static/build/`，后端通过 Go embed 将其打包进二进制。
+```bash
+rsync -av --delete --exclude='static/icons' --exclude='static/images' --exclude='favicon.ico' frontend/apps/allin-ssl/dist/ static/build/
+```
+
+> ⚠️ **注意**：`static/build/static/icons/`、`static/build/static/images/`、`static/build/static/png/` 下的图标与图片文件由 Git 维护，**不会**由 `pnpm build` 生成。切勿执行 `rm -rf static/build` 或 `rm -rf static/build/*` 等全量清除操作，否则这些文件将丢失，需通过 `git checkout HEAD -- static/build/static/icons static/build/static/images static/build/static/png static/build/favicon.ico` 恢复。
+#### 3. 编译后端并启动
+```bash
+go mod tidy
+go build -o allinssl cmd/main.go
+./allinssl start
+```
+
+### 首次配置
+1. 访问 `http://your-server-ip:port/安全入口`
+2. 添加DNS提供商和主机提供商凭证 ☁️
+3. 创建工作流
+
+[完整安装文档](https://allinssl.com/guide/getting-started.html)
+
+## 🎯 核心功能
+
+### 📜 证书管理
+![证书管理流程](https://allinssl.com/images/workflow-edit.png)
+
+| 功能         | 支持提供商                          |
+|--------------|-----------------------------------|
+| DNS验证      | 阿里云、腾讯云、Cloudflare...      |
+| 证书部署     | 宝塔面板、1Panel、阿里云CDN、腾讯云COS |
+| 监控通知     | 邮件、Webhook、钉钉                |
+
+### ⚙️ 自动化流程
+```mermaid
+graph LR
+A[证书申请] --> B{有效期监控}
+B -->|剩余30天| C[自动续期]
+C --> D[部署到目标平台]
+D --> E[通知结果]
+```
+
+## 🔑 API Key 访问
+
+系统支持通过 API Key 签名方式直接调用接口，无需 Session 登录，方便脚本自动化操作证书。
+
+### 配置
+
+进入 **常用设置 → API 接口访问**，点击「生成」生成随机密钥，保存后即可使用。清除密钥可关闭 API 访问。
+
+### 签名算法
+
+```
+keyMd5    = MD5(api_key)
+api_token = MD5(timestamp + keyMd5)
+```
+
+每次请求附带以下参数（Query 或 Form 均可）：
+
+| 参数 | 说明 |
+|------|------|
+| `api_token` | 签名值（小写十六进制） |
+| `timestamp` | 当前 Unix 秒级时间戳，误差不超过 5 分钟 |
+
+### Python 示例
+
+```python
+import hashlib, time, urllib.request, urllib.parse
+
+api_key = 'your_api_key'
+timestamp = str(int(time.time()))
+key_md5   = hashlib.md5(api_key.encode()).hexdigest()
+api_token = hashlib.md5((timestamp + key_md5).encode()).hexdigest()
+
+# 下载证书（id 为证书 ID）
+url  = 'http://your-server/v1/cert/download?id=1'
+url += f'&api_token={api_token}&timestamp={timestamp}'
+urllib.request.urlretrieve(url, 'cert.zip')
+
+# 上传证书
+data = urllib.parse.urlencode({
+    'api_token': api_token,
+    'timestamp': timestamp,
+    'cert': open('cert.pem').read(),
+    'key':  open('key.pem').read(),
+}).encode()
+req = urllib.request.Request('http://your-server/v1/cert/upload_cert', data)
+print(urllib.request.urlopen(req).read().decode())
+```
+
+### 可用接口
+
+> ⚠️ API Key 校验为全局中间件，附带正确的 `api_token` + `timestamp` 即可访问下列任意接口（等同于登录态权限），请妥善保管密钥，不要泄露给不可信方。
+
+<details>
+<summary><strong>证书管理</strong> <code>/v1/cert</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/cert/get_list` | 获取证书列表 |
+| POST | `/v1/cert/upload_cert` | 上传证书（`cert` + `key` 字段） |
+| POST | `/v1/cert/update_cert` | 更新证书信息 |
+| POST | `/v1/cert/del_cert` | 删除证书 |
+| GET  | `/v1/cert/download?id={id}` | 下载证书 zip |
+
+</details>
+
+<details>
+<summary><strong>ACME 账号</strong> <code>/v1/acme_account</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/acme_account/get_list` | 获取账号列表 |
+| POST | `/v1/acme_account/get_ca_list` | 获取可用 CA 列表 |
+| POST | `/v1/acme_account/add_account` | 添加账号 |
+| POST | `/v1/acme_account/del_account` | 删除账号 |
+| POST | `/v1/acme_account/upd_account` | 修改账号 |
+| POST | `/v1/acme_account/get_account_uri` | 获取账号 Account URI（配置 dns-persist-01 TXT 记录时使用） |
+
+</details>
+
+<details>
+<summary><strong>授权管理</strong> <code>/v1/access</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/access/get_list` | 获取授权列表（分页） |
+| POST | `/v1/access/get_all` | 获取全部授权（不分页） |
+| POST | `/v1/access/add_access` | 添加授权 |
+| POST | `/v1/access/upd_access` | 修改授权 |
+| POST | `/v1/access/del_access` | 删除授权 |
+| POST | `/v1/access/test_access` | 测试授权连通性 |
+| POST | `/v1/access/get_sites` | 获取站点列表（面板类授权） |
+| POST | `/v1/access/get_eab_list` | 获取 EAB 列表（分页） |
+| POST | `/v1/access/get_all_eab` | 获取全部 EAB |
+| POST | `/v1/access/add_eab` | 添加 EAB |
+| POST | `/v1/access/upd_eab` | 修改 EAB |
+| POST | `/v1/access/del_eab` | 删除 EAB |
+| POST | `/v1/access/get_plugins` | 获取部署插件列表 |
+| POST | `/v1/access/get_plugin_actions` | 获取插件支持的动作 |
+| POST | `/v1/access/get_plugin_raw_metadata` | 获取插件原始元数据 |
+
+</details>
+
+<details>
+<summary><strong>工作流</strong> <code>/v1/workflow</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/workflow/get_list` | 获取工作流列表 |
+| POST | `/v1/workflow/add_workflow` | 添加工作流 |
+| POST | `/v1/workflow/upd_workflow` | 修改工作流 |
+| POST | `/v1/workflow/del_workflow` | 删除工作流 |
+| POST | `/v1/workflow/exec_type` | 修改执行方式（定时/手动） |
+| POST | `/v1/workflow/active` | 启用 / 禁用工作流 |
+| POST | `/v1/workflow/execute_workflow` | 手动触发工作流 |
+| POST | `/v1/workflow/stop` | 终止正在执行的工作流 |
+| POST | `/v1/workflow/get_workflow_history` | 获取执行历史 |
+| POST | `/v1/workflow/get_exec_log` | 获取执行日志 |
+| POST | `/v1/workflow/del_workflow_history` | 删除执行历史 |
+
+</details>
+
+<details>
+<summary><strong>监控</strong> <code>/v1/monitor</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/monitor/get_list` | 获取监控列表 |
+| POST | `/v1/monitor/add_monitor` | 添加监控 |
+| POST | `/v1/monitor/upd_monitor` | 修改监控 |
+| POST | `/v1/monitor/del_monitor` | 删除监控 |
+| POST | `/v1/monitor/set_monitor` | 启用 / 禁用监控 |
+| POST | `/v1/monitor/get_monitor_info` | 获取监控详情 |
+| POST | `/v1/monitor/get_err_record` | 获取异常记录 |
+| POST | `/v1/monitor/file_add_monitor` | 批量导入监控 |
+| GET  | `/v1/monitor/template` | 下载批量导入模板 |
+
+</details>
+
+<details>
+<summary><strong>通知报告</strong> <code>/v1/report</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/report/get_list` | 获取通知配置列表 |
+| POST | `/v1/report/add_report` | 添加通知配置 |
+| POST | `/v1/report/upd_report` | 修改通知配置 |
+| POST | `/v1/report/del_report` | 删除通知配置 |
+| POST | `/v1/report/notify_test` | 发送测试通知 |
+
+</details>
+
+<details>
+<summary><strong>私有 CA</strong> <code>/v1/private_ca</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/private_ca/create_root_ca` | 创建根 CA |
+| POST | `/v1/private_ca/create_intermediate_ca` | 创建中间 CA |
+| POST | `/v1/private_ca/get_ca_list` | 获取 CA 列表 |
+| POST | `/v1/private_ca/del_ca` | 删除 CA |
+| POST | `/v1/private_ca/create_leaf_cert` | 签发叶子证书 |
+| POST | `/v1/private_ca/get_leaf_cert_list` | 获取叶子证书列表 |
+| POST | `/v1/private_ca/del_leaf_cert` | 删除叶子证书 |
+| GET  | `/v1/private_ca/download_cert` | 下载叶子证书 |
+
+</details>
+
+<details>
+<summary><strong>系统设置 / 概览</strong> <code>/v1/setting</code>、<code>/v1/overview</code></summary>
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/v1/setting/get_setting` | 获取系统设置 |
+| POST | `/v1/setting/save_setting` | 保存系统设置 |
+| POST | `/v1/setting/save_api_key` | 生成 / 清除 API Key |
+| POST | `/v1/setting/get_version` | 获取版本信息 |
+| POST | `/v1/setting/shutdown` | 关闭服务 |
+| POST | `/v1/setting/restart` | 重启服务 |
+| GET  | `/v1/setting/download_data` | 导出数据备份 |
+| POST | `/v1/setting/upload_data` | 导入数据备份 |
+| POST | `/v1/overview/get_overviews` | 获取首页概览数据 |
+
+</details>
+
+## 🛠️ 技术架构
+
+### 🏗️ 系统架构图
+```mermaid
+graph TB
+    subgraph "前端层"
+        A[Vue 3 + Naive UI]
+        A --> B[Vite构建系统]
+        A --> C[Turbo Monorepo]
+    end
+    
+    subgraph "后端层"
+        D[Gin Web框架]
+        D --> E[RESTful API]
+        D --> F[Session管理]
+        D --> G[中间件层]
+    end
+    
+    subgraph "核心服务层"
+        H[证书申请服务]
+        I[证书部署服务] 
+        J[工作流引擎]
+        K[监控调度服务]
+        L[通知服务]
+    end
+    
+    subgraph "数据存储层"
+        M[(SQLite数据库)]
+        N[文件存储]
+    end
+    
+    subgraph "外部集成"
+        O[ACME协议]
+        P[云服务商API]
+        Q[DNS提供商]
+        R[CDN/面板API]
+    end
+    
+    A -.-> D
+    D --> J
+    J --> H
+    J --> I
+    J --> K
+    J --> L
+    H --> M
+    I --> M
+    K --> M
+    L --> M
+    H --> O
+    I --> P
+    H --> Q
+    I --> R
+```
+
+
+
+## 📚 使用文档
+- [快速入门指南](https://allinssl.com/guide/getting-started.html)
+- [操作手册](https://allinssl.com/features/dashboard.html)
+
+## 💻 命令行操作
+```bash
+# 基本操作
+allinssl 1: 启动服务 🚀
+allinssl 2: 停止服务 ⛔
+allinssl 3: 重启服务 🔄
+allinssl 4: 修改安全入口 🔐
+allinssl 5: 修改用户名 👤
+allinssl 6: 修改密码 🔑
+allinssl 7: 修改端口 🔧
+
+# Web服务管理
+allinssl 8: 关闭web服务 🌐➖
+allinssl 9: 开启web服务 🌐➕
+allinssl 10: 重启web服务 🌐🔄
+
+# 后台任务管理
+allinssl 11: 关闭后台自动调度 📻⛔
+allinssl 12: 开启后台自动调度 📻✅
+allinssl 13: 重启后台自动调度 📻🔄
+
+# 系统管理
+allinssl 14: 关闭https 🔓
+allinssl 15: 获取面板地址 📋
+allinssl 16: 更新ALLinSSL到最新版本（文件覆盖安装） 🔄⬆️
+allinssl 17: 卸载ALLinSSL 🗑️
+```
+
+## 🤝 参与贡献
+欢迎通过以下方式参与项目：
+1. 提交Issue报告问题 
+2. 发起Pull Request改进代码 💻
+3. 完善项目文档 📖
+4. 分享使用案例 ✨
+
+[贡献指南](https://allinssl.com/community/contributing.html)
+
+## 📞 联系我们
+- QQ交流群：[768610151](https://qm.qq.com/q/KTmWuskjm0) 👥
+- 邮箱：support@allinssl.com 📧
+- 问题反馈：[GitHub Issues](https://github.com/allinssl/allinssl/issues)
+
+## 🙏 致谢
+
+**感谢在SSL证书管理领域做出贡献的开源项目和社区：**
+- [Let's Encrypt](https://letsencrypt.org/) - 免费SSL证书颁发机构
+- [lego](https://github.com/go-acme/lego) - Go语言ACME客户端，为本项目提供核心证书申请功能
+- [acme.sh](https://github.com/acmesh-official/acme.sh) - 纯Shell脚本实现的ACME客户端
+- [certimate](https://github.com/usual2970/certimate) - 工作流部分设计参考，以及使用了其京东云DNS的代码实现
+- [certd](https://github.com/certd/certd) - 工作流部分的设计参考
+- [Certbot](https://certbot.eff.org/) - EFF官方ACME客户端
+- [Caddy](https://caddyserver.com/) - 自动HTTPS Web服务器
+
+**感谢以下技术栈和依赖库：**
+
+**🔧 后端依赖**
+- **Web框架**: [gin-gonic/gin](https://github.com/gin-gonic/gin) - HTTP Web框架
+- **数据库**: [modernc.org/sqlite](https://github.com/modernc/sqlite) - SQLite数据库
+- **ACME客户端**: [go-acme/lego](https://github.com/go-acme/lego) - 证书申请核心
+- **会话管理**: [gin-contrib/sessions](https://github.com/gin-contrib/sessions) - 用户会话
+- **HTTP客户端**: [go-resty/resty](https://github.com/go-resty/resty) - API调用
+- **邮件服务**: [jordan-wright/email](https://github.com/jordan-wright/email) - 邮件发送
+- **验证码**: [mojocn/base64Captcha](https://github.com/mojocn/base64Captcha) - 图形验证码
+- **UUID**: [google/uuid](https://github.com/google/uuid) - 唯一标识符
+- **环境变量**: [joho/godotenv](https://github.com/joho/godotenv) - 配置管理
+
+**🎨 前端依赖**
+- **框架**: [Vue 3](https://vuejs.org/) - 渐进式JavaScript框架
+- **UI组件**: [Naive UI](https://naiveui.com/) - Vue 3组件库
+- **构建工具**: [Vite](https://vitejs.dev/) - 极速构建工具
+- **包管理**: [Turbo](https://turbo.build/) - Monorepo构建系统
+- **路由**: [Vue Router](https://router.vuejs.org/) - 单页应用路由
+- **状态管理**: [Pinia](https://pinia.vuejs.org/) - 轻量级状态管理
+- **工具库**: [VueUse](https://vueuse.org/) - Vue组合式API工具
+- **图表**: [ECharts](https://echarts.apache.org/) - 数据可视化
+- **工作流**: [Vue Flow](https://vueflow.dev/) - 可视化流程编辑器
+- **HTTP**: [Axios](https://axios-http.com/) - HTTP客户端
+- **样式**: [TailwindCSS](https://tailwindcss.com/) - CSS框架
+
+**☁️ 云服务集成**
+- **阿里云**: [alibabacloud-go](https://github.com/alibabacloud-go) SDK系列
+- **腾讯云**: [tencentcloud-sdk-go](https://github.com/tencentcloud/tencentcloud-sdk-go) 
+- **华为云**: [huaweicloud-sdk-go-v3](https://github.com/huaweicloud/huaweicloud-sdk-go-v3)
+- **百度云**: [bce-sdk-go](https://github.com/baidubce/bce-sdk-go)
+- **火山引擎**: [volcengine-go-sdk](https://github.com/volcengine/volcengine-go-sdk)
+- **京东云**: [jdcloud-sdk-go](https://github.com/jdcloud-api/jdcloud-sdk-go)
+- **七牛云**: [qiniu/go-sdk](https://github.com/qiniu/go-sdk)
+- **Azure**: [azure-sdk-for-go](https://github.com/Azure/azure-sdk-for-go)
+- **AWS**: [aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2)
+- **Cloudflare**: [cloudflare-go](https://github.com/cloudflare/cloudflare-go)
+
+**证书颁发机构：**
+- [Let's Encrypt](https://letsencrypt.org/) - 免费SSL证书
+- [ZeroSSL](https://zerossl.com/) - 免费SSL证书
+- [Google Trust Services](https://pki.goog/) - Google证书服务
+- [SSL.com](https://www.ssl.com/) - 商业SSL证书
+- [BuyPass](https://www.buypass.com/) - 挪威免费SSL证书
+- [TrustAsia](https://www.trustasia.com/) - 亚洲诚信
+- [Racent](https://www.racent.com/) - 锐成信息
+
+**特别感谢：**
+- 所有DNS服务商和CDN提供商对API的开放支持
+
+**感谢以下用户对本项目的支持和贡献：**
+- [@寒雨馨](https://www.hanyuxin.cn/)
+
+
+## 📜 许可证
+本项目采用 [AGPL-3.0 license](./LICENSE) 开源协议
+
+## 🌟Star 历史
+
+[![Star History Chart](https://api.star-history.com/svg?repos=allinssl/allinssl&type=Date)](https://www.star-history.com/#allinssl/allinssl&Date)
+
+---
+
+> 🌟 **Star本项目以支持开发** | 推荐用于：中小型网站运维、多证书管理场景、自动化HTTPS部署

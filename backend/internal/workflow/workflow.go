@@ -2,8 +2,10 @@ package workflow
 
 import (
 	"ALLinSSL/backend/public"
+	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -82,12 +84,17 @@ func DelWorkflow(id string) error {
 		return err
 	}
 	defer s.Close()
-	_, err = s.Where("id=?", []interface{}{id}).Delete()
+	ids := strings.Split(id, ",")
+	params := make([]any, len(ids))
+	for i, value := range ids {
+		params[i] = strings.TrimSpace(value)
+	}
+	_, err = s.Where("id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", params).Delete()
 	if err != nil {
 		return err
 	}
 	// 清理工作流历史记录
-	err = CleanWorkflowHistory()
+	err = CleanWorkflowHistory(params)
 	if err != nil {
 		return fmt.Errorf("清理工作流历史记录失败: %v", err)
 	}
@@ -128,13 +135,38 @@ func UpdWorkflow(id, name, content, execType, active, execTime string) error {
 }
 
 func UpdExecType(id, execType string) error {
-	err := UpdDb(id, map[string]interface{}{
-		"exec_type": execType,
-	})
+	s, err := GetSqlite()
 	if err != nil {
 		return err
 	}
-	return nil
+	data, err := s.Where("id=?", []interface{}{id}).Select()
+	s.Close()
+	if err != nil {
+		return err
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("工作流不存在")
+	}
+	// 内容里的开始节点也保存了触发方式，需与列表同步，否则编辑时仍显示旧值
+	var node map[string]any
+	content, _ := data[0]["content"].(string)
+	if err = json.Unmarshal([]byte(content), &node); err != nil {
+		return fmt.Errorf("检测到工作流配置有问题：%v", err)
+	}
+	config, ok := node["config"].(map[string]any)
+	if !ok {
+		config = map[string]any{}
+		node["config"] = config
+	}
+	config["exec_type"] = execType
+	body, err := json.Marshal(node)
+	if err != nil {
+		return err
+	}
+	return UpdDb(id, map[string]interface{}{
+		"exec_type": execType,
+		"content":   string(body),
+	})
 }
 
 func UpdActive(id, active string) error {
@@ -177,10 +209,8 @@ func ExecuteWorkflow(id string) error {
 		err = RunWorkflow(c, ctx)
 		if err != nil {
 			fmt.Println("执行工作流失败:", err)
-			SetWorkflowStatus(id, RunID, "fail")
-		} else {
-			SetWorkflowStatus(id, RunID, "success")
 		}
+		SetWorkflowStatus(id, RunID, ctx.GetWorkflowStatus(err))
 	}(id, content)
 	return nil
 }
@@ -211,6 +241,14 @@ func resolveInputs(inputs []WorkflowNodeParams, ctx *ExecutionContext) map[strin
 }
 
 func RunNode(node *WorkflowNode, ctx *ExecutionContext) error {
+	executionCtx := ctx.Context
+	// 兼容直接构造执行上下文、未指定取消上下文的现有调用。
+	if executionCtx == nil {
+		executionCtx = context.Background()
+	}
+	if err := executionCtx.Err(); err != nil {
+		return err
+	}
 	// 获取上下文
 	inputs := resolveInputs(node.Inputs, ctx)
 	// 组装参数
@@ -225,14 +263,15 @@ func RunNode(node *WorkflowNode, ctx *ExecutionContext) error {
 	node.Config["NodeId"] = node.Id
 
 	// 执行当前节点
-	result, err := Executors(node.Type, node.Config)
+	result, err := executeWithContext(executionCtx, node.Type, node.Config)
+	// 取消不属于业务失败，不能继续进入结果分支或后续节点。
+	if cancelErr := executionCtx.Err(); cancelErr != nil {
+		return cancelErr
+	}
 
 	var status ExecutionStatus
 	if err != nil {
 		status = StatusFailed
-		ctx.mu.Lock()
-		ctx.HasFailure = true
-		ctx.mu.Unlock()
 		if node.ChildNode == nil || node.ChildNode.Type != "execute_result_branch" {
 			return err
 		}
@@ -257,8 +296,8 @@ func RunNode(node *WorkflowNode, ctx *ExecutionContext) error {
 				wg.Add(1)
 				go func(node *WorkflowNode) {
 					defer wg.Done()
-					if runErr := RunNode(node, ctx); runErr != nil {
-						errChan <- runErr
+					if err := RunNode(node, ctx); err != nil {
+						errChan <- err
 					}
 				}(branch)
 			}
@@ -331,16 +370,10 @@ func RunWorkflow(content string, ctx *ExecutionContext) error {
 	} else {
 		ctx.Logger.Info("=============开始执行=============")
 		err = RunNode(&node, ctx)
+		// fmt.Println(err)
 		if err != nil {
 			ctx.Logger.Info("=============执行失败=============")
 			return err
-		}
-		ctx.mu.RLock()
-		hasFailure := ctx.HasFailure
-		ctx.mu.RUnlock()
-		if hasFailure {
-			ctx.Logger.Info("=============执行失败=============")
-			return fmt.Errorf("工作流中存在失败的节点")
 		}
 		ctx.Logger.Info("=============执行完成=============")
 		return nil

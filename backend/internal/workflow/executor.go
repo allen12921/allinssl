@@ -4,12 +4,16 @@ import (
 	"ALLinSSL/backend/internal/cert"
 	certApply "ALLinSSL/backend/internal/cert/apply"
 	certDeploy "ALLinSSL/backend/internal/cert/deploy"
+	"ALLinSSL/backend/internal/module"
 	"ALLinSSL/backend/internal/private_ca"
 	"ALLinSSL/backend/internal/report"
 	"ALLinSSL/backend/public"
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
+	"time"
 )
 
 // var executors map[string]func(map[string]any) (any, error)
@@ -19,6 +23,17 @@ import (
 // }
 
 func Executors(exec string, params map[string]any) (any, error) {
+	return executeWithContext(context.Background(), exec, params)
+}
+
+func executeWithContext(ctx context.Context, exec string, params map[string]any) (any, error) {
+	if module.Default != nil {
+		return module.Default.ExecuteWorkflow(ctx, exec, params, func(values map[string]any) (any, error) { return executeBuiltin(exec, values) })
+	}
+	return executeBuiltin(exec, params)
+}
+
+func executeBuiltin(exec string, params map[string]any) (any, error) {
 	switch exec {
 	case "apply":
 		return apply(params)
@@ -189,34 +204,64 @@ func upload(params map[string]any) (any, error) {
 		logger.Info("=============上传成功=============")
 
 		return params, nil
-	} else {
-		certId := ""
-		switch v := params["cert_id"].(type) {
-		case float64:
-			certId = strconv.Itoa(int(v))
-		case string:
-			certId = v
-		default:
-			logger.Info("=============上传证书获取失败=============")
-			return nil, errors.New("证书 ID 类型错误")
-		}
-		result := map[string]any{}
-		certObj, err := cert.GetCert(certId)
-		if err != nil {
-			logger.Error(err.Error())
-			logger.Info("=============上传证书获取失败=============")
-			return nil, err
-		}
-		if certObj == nil {
-			logger.Error("证书不存在")
-			logger.Info("=============上传证书获取失败=============")
-			return nil, errors.New("证书不存在")
-		}
-		logger.Debug(fmt.Sprintf("证书 ID: %s", certId))
-		result["cert"] = certObj["cert"]
-		result["key"] = certObj["key"]
+	}
+	certId := ""
+	switch v := params["cert_id"].(type) {
+	case float64:
+		certId = strconv.Itoa(int(v))
+	case string:
+		certId = v
+	default:
+		logger.Info("=============上传证书获取失败=============")
+		return nil, errors.New("证书 ID 类型错误")
+	}
+	result := map[string]any{}
+	certObj, err := cert.GetCert(certId)
+	if err != nil {
+		logger.Error(err.Error())
+		logger.Info("=============上传证书获取失败=============")
+		return nil, err
+	}
+	if certObj == nil {
+		logger.Error("证书不存在")
+		logger.Info("=============上传证书获取失败=============")
+		return nil, errors.New("证书不存在")
+	}
+	logger.Debug(fmt.Sprintf("证书 ID: %s", certId))
+	result["cert"] = certObj["cert"]
+	result["key"] = certObj["key"]
+	useLocal, _ := params["use_local_cert"].(bool)
+	if !useLocal {
 		return result, nil
 	}
+	domains, _ := params["domains"].(string)
+	endDay, ok := params["end_day"].(float64)
+	if domains == "" || !ok || endDay < 1 {
+		logger.Error("请填写匹配域名和剩余有效期阈值")
+		return nil, errors.New("请填写匹配域名和剩余有效期阈值")
+	}
+	original, err := public.ParseCertificate([]byte(certObj["cert"]))
+	if err != nil {
+		logger.Error(err.Error())
+		return nil, err
+	}
+	if original.NotAfter.Sub(time.Now()).Hours()/24 > endDay {
+		return result, nil
+	}
+	matched, err := certApply.FindMatchedCert("", strings.Split(domains, ","), "local")
+	if err != nil {
+		logger.Error(err.Error())
+		return nil, err
+	}
+	if matched.DaysLeft <= endDay {
+		err = fmt.Errorf("没有符合条件的本地证书：剩余有效期必须大于 %g 天", endDay)
+		logger.Error(err.Error())
+		return nil, err
+	}
+	logger.Info(fmt.Sprintf("已从本地获取符合条件的证书，域名：%s，剩余有效期：%.2f 天", domains, matched.DaysLeft))
+	result["cert"] = matched.Data["cert"]
+	result["key"] = matched.Data["key"]
+	return result, nil
 }
 
 func notify(params map[string]any) (any, error) {

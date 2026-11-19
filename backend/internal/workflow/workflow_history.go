@@ -4,7 +4,6 @@ import (
 	"ALLinSSL/backend/public"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -117,45 +116,21 @@ func GetExecLog(id string) (string, error) {
 	return string(log), nil
 }
 
-func CleanWorkflowHistory() error {
-	s, err := GetSqlite()
+func CleanWorkflowHistory(workflowIds []any) error {
+	s, err := GetSqliteObjWH()
 	if err != nil {
 		return err
 	}
 	defer s.Close()
-	// 获取所有工作流ID
-	data, err := s.Select()
+	// 只清理本次删除的工作流，保留其他历史记录。
+	where := "workflow_id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(workflowIds)), ",") + ")"
+	data, err := s.Where(where, workflowIds).Select()
 	if err != nil {
 		return err
 	}
-	var workflowIds []string
-	for _, v := range data {
-		if workflowId, ok := v["id"].(int64); ok {
-			workflowIds = append(workflowIds, strconv.FormatInt(workflowId, 10))
-		}
-	}
-	workflowIdsStr := strings.Join(workflowIds, ",")
-	s.TableName = "workflow_history"
-	if workflowIdsStr == "" {
-		data, err = s.Select()
-		if err != nil {
-			return err
-		}
-		_, err = s.Delete()
-		if err != nil {
-			return err
-		}
-	} else {
-		// 获取无意义的工作流记录id
-		data, err = s.Where("workflow_id NOT IN ("+workflowIdsStr+")", nil).Select()
-		if err != nil {
-			return err
-		}
-		// 删除无意义的工作流记录
-		_, err = s.Where("workflow_id NOT IN ("+workflowIdsStr+")", nil).Delete()
-		if err != nil {
-			return err
-		}
+	_, err = s.Where(where, workflowIds).Delete()
+	if err != nil {
+		return err
 	}
 	// 删除工作流执行日志
 	logPath := public.GetSettingIgnoreError("workflow_log_path")

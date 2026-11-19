@@ -111,7 +111,7 @@ export interface ExecuteResultConditionNodeData
 }
 
 // 节点类型
-export type NodeNum =
+type BuiltinNodeNum =
   | typeof START // 开始节点
   | typeof DEFAULT // 默认节点
   | typeof END // 结束节点
@@ -125,8 +125,13 @@ export type NodeNum =
   | typeof PRIVATE_CA // 私有CA节点（业务）
   | typeof DEPLOY; // 部署节点（业务）
 
+// 插件节点类型由宿主生成，格式固定为 plugin:<模块标识>:<节点名>
+export type NodeNum = BuiltinNodeNum | `plugin:${string}:${string}`;
+
 // 节点配置映射
 export type NodeOptions = {
+  [key: string]: () => BaseRenderNodeOptions<BaseNodeData>;
+} & {
   [START]: () => BaseRenderNodeOptions<BaseNodeData & { type: typeof START }>;
   [END]: () => BaseRenderNodeOptions<BaseNodeData & { type: typeof END }>;
   [DEFAULT]: () => BaseRenderNodeOptions<
@@ -229,12 +234,14 @@ export interface ApplyNodeConfig {
   provider_id: string; // DNS提供商授权ID
   provider: string; // DNS提供商
   end_day: number; // 续签间隔
+  cert_source?: 'workflow' | 'local'; // 历史证书取用位置，缺省为当前工作流
   // 高级功能
   name_server: string; // DNS递归服务器
   skip_check: number; // 跳过检查
   algorithm: string; // 数字证书算法
   close_cname: number; // 禁用CNAME支持，0关闭1开启，默认0
   max_wait?: number; // 预检查超时时间，单位秒（可选）
+  certificate_timeout?: number | null; // 证书下发超时时间，单位秒，缺省为60秒
   ignore_check: number; // 忽略预检查结果，1继续，0停止，默认0
   ari_enabled?: number; // 启用ARI续签建议，1启用，0关闭；旧工作流缺省关闭
   // 高级功能
@@ -400,8 +407,11 @@ interface NotifyNodeConfig {
 // 定义上传节点配置类型
 interface UploadNodeConfig {
   cert_id: string;
-  cert: string;
-  key: string;
+  domains?: string;
+  use_local_cert?: boolean;
+  end_day?: number;
+  cert?: string; // 仅用于自定义上传和旧配置兼容，不随证书引用保存
+  key?: string;
 }
 
   // 定义私有CA节点配置类型
