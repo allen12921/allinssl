@@ -1,1 +1,0 @@
-import{s as e}from"./index.module-B-JsOTYv.js";import{d as s,c as d,E as a}from"./main-D-iO12We.js";const o=s({name:"EndNode",setup:()=>()=>d("div",{class:"flex flex-col items-center justify-center"},[d("div",{class:e.endNode},null),d("div",{class:e.endNodeTxt},[a("流程结束")])])});export{o as default};

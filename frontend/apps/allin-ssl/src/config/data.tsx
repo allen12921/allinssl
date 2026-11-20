@@ -93,6 +93,7 @@ export const ApiProjectConfig: Record<string, ApiProjectType> = {
       oss: { name: $t("t_2_1746697487164") },
       waf: { name: $t("t_10_1744958860078") },
       esa: { name: $t("t_1_1752230146379") },
+      fc: { name: "阿里云函数计算FC" },
     },
     sort: 6,
   },

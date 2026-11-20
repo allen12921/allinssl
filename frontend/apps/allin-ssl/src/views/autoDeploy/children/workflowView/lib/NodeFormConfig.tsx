@@ -219,6 +219,16 @@ export function createNodeFormConfig() {
 		},
 
 		/**
+		 * 创建阿里云函数计算（FC 3.0）自定义域名相关字段
+		 */
+		aliyunFcDeploy() {
+			return [
+				this.input($t('t_7_1747280808936'), 'region', { placeholder: '函数计算所在地域，如 cn-beijing' }),
+				this.input($t('t_17_1745227838561'), 'domain', { placeholder: '函数计算自定义域名，多个用英文逗号分隔' }),
+			]
+		},
+
+		/**
 		 * 创建LeCDN相关字段
 		 */
 		leCdnDeploy() {

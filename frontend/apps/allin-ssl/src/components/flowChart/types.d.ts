@@ -272,6 +272,7 @@ export interface DeployConfig<
     | "aliyun-oss"
     | "aliyun-waf"
     | "aliyun-esa"
+    | "aliyun-fc"
     | "doge-cdn"
     | "baidu-cdn"
     | "qiniu-cdn"

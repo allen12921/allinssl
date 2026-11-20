@@ -1,0 +1,1 @@
+import{d as a,c as e,E as s}from"./main-BBiiXvW7.js";const t=a({name:"BranchNode",props:{node:{type:Object,default:()=>({})}},setup:()=>()=>e("div",null,[s("渲染节点失败，请检查类型是否支持")])});export{t as default};

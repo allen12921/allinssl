@@ -1,0 +1,1 @@
+import{m as t}from"./main-BBiiXvW7.js";const e=e=>t("/v1/cert/get_list",e),r=e=>t("/v1/cert/upload_cert",e),a=e=>t("/v1/cert/update_cert",e),c=e=>t("/v1/cert/del_cert",e);export{a,c as d,e as g,r as u};

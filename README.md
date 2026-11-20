@@ -22,6 +22,7 @@ This repository is forked from [allinssl/allinssl](https://github.com/allinssl/a
 |---------|-------------|
 | **API Key Access** | Call certificate APIs directly via MD5-based signature (`MD5(timestamp + MD5(api_key))`) without a session — ideal for script automation |
 | **AWS CloudFront Deployment** | New AWS CloudFront host provider: deploy certificates to CloudFront distributions via IAM |
+| **Alibaba Cloud Function Compute Deployment** | New deploy type for Function Compute 3.0 custom domains: replaces only the domain certificate, keeping routes, TLS and other settings unchanged |
 | **UpYun SSL Deployment** | New UpYun (又拍云) SSL certificate deployment plugin |
 | **Multi-domain Batch Deployment** | Alibaba Cloud CDN/DCDN and Qiniu Cloud CDN/OSS now accept multiple comma-separated domains for one-shot deployment |
 | **ARI Protocol Support** | Compatible with ACME Renewal Information (ARI) protocol — respects the CA-recommended renewal window |

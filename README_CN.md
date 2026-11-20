@@ -21,6 +21,7 @@
 |------|------|
 | **API Key 访问** | 支持通过 HMAC 签名方式无需 Session 直接调用证书接口，适合脚本自动化 |
 | **AWS CloudFront 部署** | 新增 AWS CloudFront 主机提供商，通过 IAM 证书完成 CloudFront 分发部署 |
+| **阿里云函数计算部署** | 新增阿里云函数计算 3.0（FC）自定义域名部署类型：只替换域名的证书，路由、TLS 等配置保持不变 |
 | **又拍云 SSL 部署** | 新增又拍云 SSL 证书部署插件 |
 | **多域名批量部署** | 阿里云 CDN/DCDN、七牛云 CDN/OSS 支持一次填写多个域名批量部署 |
 | **ARI 协议兼容** | 兼容 ACME Renewal Information (ARI) 协议，支持 CA 推荐的最佳续期时间窗口 |

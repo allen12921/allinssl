@@ -259,6 +259,9 @@ export default defineComponent({
 				case 'aliyun-esa':
 					config.push(...formConfig.aliyunEsaDeploy())
 					break
+				case 'aliyun-fc':
+					config.push(...formConfig.aliyunFcDeploy())
+					break
 				case 'lecdn':
 					config.push(...formConfig.leCdnDeploy())
 					break
